@@ -17,21 +17,26 @@ var has_opt bool
 func main() {
 	flag.Parse()
 	log.SetFlags(log.Lshortfile)
-	read_file()
+	read_file(*input)
+	write_file(*output)
 	has_opt = true
+	n := 0
 	for has_opt {
 		has_opt = false
+		read_file(*output)
 		parse_lua()
 		opt_lua()
+		write_file(*output)
+		n++
 	}
-	write_file()
+	log.Println("n:", n)
 }
 
 var gfilecontent []string
 
-func read_file() {
+func read_file(filename string) {
 	var filecontent []string
-	file, err := os.Open(*input)
+	file, err := os.Open(filename)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -78,6 +83,10 @@ func (lv *lua_visitor) Visit(n ast.Node) ast.Visitor {
 
 func opt_lua() {
 	f := lua_visitor{f: func(n ast.Node, ok *bool) {
+		if has_opt {
+			*ok = false
+			return
+		}
 		if n != nil {
 			switch n.(type) {
 			case *ast.FuncDecl:
@@ -90,8 +99,6 @@ func opt_lua() {
 		ast.Walk(&f, stmt)
 	}
 }
-
-var g_first_table_access_assign_new_str_his = make(map[string]int)
 
 func opt_func(func_decl *ast.FuncDecl) {
 	block := func_decl.Block
@@ -144,7 +151,7 @@ func opt_func(func_decl *ast.FuncDecl) {
 									g_first_table_access_assign_new_str_his[params[0]] = 1
 									first_table_access_assign_new_str = params[0]
 									first_line = line
-									log.Println("first_table_access_assign_new_str:", first_table_access_assign_new_str)
+									log.Println("first_table_access_assign_new_str:", first_table_access_assign_new_str, " ", line)
 								}
 							}
 						}
@@ -174,7 +181,7 @@ func opt_func(func_decl *ast.FuncDecl) {
 		if n != nil {
 			line := n.Line()
 			if line > first_line {
-				gfilecontent[line-1] = strings.ReplaceAll(gfilecontent[line-1], first_table_access_assign_new_str, new_table_access_assign_new_str)
+				gfilecontent[line-1] = replace_table_access(gfilecontent[line-1], first_table_access_assign_new_str, new_table_access_assign_new_str)
 			}
 		}
 	}}
@@ -190,8 +197,8 @@ func opt_func(func_decl *ast.FuncDecl) {
 	gfilecontent = filecontent
 }
 
-func write_file() {
-	file, err := os.Create(*output)
+func write_file(filename string) {
+	file, err := os.Create(filename)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -199,4 +206,34 @@ func write_file() {
 	for _, line := range gfilecontent {
 		file.WriteString(line + "\n")
 	}
+}
+
+func replace_table_access(content string, src string, dst string) string {
+	tmp := content
+	begin := 0
+	for {
+		idx := strings.Index(tmp[begin:], src)
+		if idx == -1 {
+			break
+		}
+		idx += begin
+		if idx > 0 {
+			// front must not be . and a-zA-Z0-9_
+			if tmp[idx-1] == '.' || (tmp[idx-1] >= 'a' && tmp[idx-1] <= 'z') || (tmp[idx-1] >= 'A' && tmp[idx-1] <= 'Z') || (tmp[idx-1] >= '0' && tmp[idx-1] <= '9') || tmp[idx-1] == '_' {
+				// use next
+				begin = idx + len(src)
+				continue
+			}
+		}
+		if idx+len(src) < len(tmp) {
+			// back must not be . and a-zA-Z0-9_
+			if tmp[idx+len(src)] == '.' || (tmp[idx+len(src)] >= 'a' && tmp[idx+len(src)] <= 'z') || (tmp[idx+len(src)] >= 'A' && tmp[idx+len(src)] <= 'Z') || (tmp[idx+len(src)] >= '0' && tmp[idx+len(src)] <= '9') || tmp[idx+len(src)] == '_' {
+				// use next
+				begin = idx + len(src)
+				continue
+			}
+		}
+		tmp = tmp[:idx] + dst + tmp[idx+len(src):]
+	}
+	return tmp
 }
