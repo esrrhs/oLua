@@ -200,7 +200,7 @@ func opt_func(func_decl *ast.FuncDecl) {
 	replace_used_table_access(first_block, first_line, first_table_access_assign_new_str, new_table_access_assign_new_str)
 
 	// insert local define
-	insert_line := get_content_space(gfilecontent[first_line-1]) + "local " + new_table_access_assign_new_str + " = " + first_table_access_assign_new_str
+	insert_line := get_content_space(gfilecontent[first_line-1]) + "local " + new_table_access_assign_new_str + " = " + first_table_access_assign_new_str + " -- opt by lua2lua"
 
 	var filecontent []string
 	filecontent = append(filecontent, gfilecontent[:first_line]...)
@@ -245,14 +245,17 @@ func table_access_to_local_name(name string) string {
 }
 
 func has_used_table_access(block []ast.Stmt, line int, dst string) bool {
-	ret := false
+	ret := 0
+	find_line := make(map[int]int)
 	f := lua_visitor{f: func(n ast.Node, ok *bool) {
 		if n != nil {
-			if n.Line() > line {
+			if n.Line() > line && find_line[n.Line()] == 0 {
+				find_line[n.Line()] = 1
 				content := gfilecontent[n.Line()-1]
-				if contain_table_access(content, dst) {
+				contain := contain_table_access(content, dst)
+				if contain > 0 {
 					if !strings.Contains(content, "local "+table_access_to_local_name(dst)+" = "+dst) {
-						ret = true
+						ret += contain
 					}
 				}
 			}
@@ -261,7 +264,7 @@ func has_used_table_access(block []ast.Stmt, line int, dst string) bool {
 	for _, stmt := range block {
 		ast.Walk(&f, stmt)
 	}
-	return ret
+	return ret > 1
 }
 
 func write_file(filename string) {
@@ -275,7 +278,8 @@ func write_file(filename string) {
 	}
 }
 
-func contain_table_access(content string, src string) bool {
+func contain_table_access(content string, src string) int {
+	ret := 0
 	tmp := content
 	begin := 0
 	for {
@@ -300,9 +304,10 @@ func contain_table_access(content string, src string) bool {
 				continue
 			}
 		}
-		return true
+		begin = idx + len(src)
+		ret++
 	}
-	return false
+	return ret
 }
 
 func replace_table_access(content string, src string, dst string) string {
