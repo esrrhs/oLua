@@ -100,88 +100,131 @@ func opt_lua() {
 	}
 }
 
-func opt_func(func_decl *ast.FuncDecl) {
-	block := func_decl.Block
-
-	first_table_access_assign_new_str := ""
-	first_line := 0
-
-	// find first assign: xxx.yyy.zzz = New()
-	f := lua_visitor{f: func(n ast.Node, ok *bool) {
-		if first_table_access_assign_new_str != "" {
-			*ok = false
-			return
-		}
-		if n != nil {
-			switch n.(type) {
-			case *ast.Assign:
-				assign := n.(*ast.Assign)
-				is_new := false
-				if len(assign.Values) == 1 {
-					switch assign.Values[0].(type) {
-					case *ast.FuncCall:
-						func_call := assign.Values[0].(*ast.FuncCall)
-						if len(func_call.Args) == 0 {
-							function := func_call.Function
-							switch function.(type) {
-							case *ast.ConstIdent:
-								ident := function.(*ast.ConstIdent)
-								if ident.Value == "New" {
-									is_new = true
-								}
-							}
-						}
-					}
-				}
-				if is_new {
-					switch assign.Targets[0].(type) {
-					case *ast.TableAccessor:
-						line := assign.Targets[0].(*ast.TableAccessor).Line()
-						content := gfilecontent[line-1]
-						content = strings.TrimSpace(content)
-						if strings.HasPrefix(content, "local ") {
-							content = strings.Replace(content, "local ", "", 1)
-						}
-						params := strings.Split(content, "=")
-						if len(params) == 2 {
-							params[0] = strings.TrimSpace(params[0])
-							params[1] = strings.TrimSpace(params[1])
-							if params[1] == "New()" {
-								if g_first_table_access_assign_new_str_his[params[0]] == 0 {
-									g_first_table_access_assign_new_str_his[params[0]] = 1
-									first_table_access_assign_new_str = params[0]
-									first_line = line
-									log.Println("first_table_access_assign_new_str:", first_table_access_assign_new_str, " ", line)
-								}
+func find_first_table_access(block []ast.Stmt) (bool, []ast.Stmt, string, int) {
+	for _, stmt := range block {
+		switch nn := stmt.(type) {
+		case *ast.Assign:
+			assign := stmt.(*ast.Assign)
+			is_new := false
+			if len(assign.Values) == 1 {
+				switch assign.Values[0].(type) {
+				case *ast.FuncCall:
+					func_call := assign.Values[0].(*ast.FuncCall)
+					if len(func_call.Args) == 0 {
+						function := func_call.Function
+						switch function.(type) {
+						case *ast.ConstIdent:
+							ident := function.(*ast.ConstIdent)
+							if ident.Value == "New" {
+								is_new = true
 							}
 						}
 					}
 				}
 			}
+			if is_new {
+				switch assign.Targets[0].(type) {
+				case *ast.TableAccessor:
+					line := assign.Targets[0].(*ast.TableAccessor).Line()
+					content := gfilecontent[line-1]
+					content = strings.TrimSpace(content)
+					if strings.HasPrefix(content, "local ") {
+						content = strings.Replace(content, "local ", "", 1)
+					}
+					params := strings.Split(content, "=")
+					if len(params) == 2 {
+						params[0] = strings.TrimSpace(params[0])
+						params[1] = strings.TrimSpace(params[1])
+						if params[1] == "New()" {
+							if has_used_table_access(block, line, params[0]) {
+								log.Println("first_table_access_assign:", params[0], " ", line)
+								return true, block, params[0], line
+							}
+						}
+					}
+				}
+			}
+		case *ast.DoBlock:
+			ok, ret_block, ret_string, ret_line := find_first_table_access(nn.Block)
+			if ok {
+				return true, ret_block, ret_string, ret_line
+			}
+		case *ast.If:
+			ok, ret_block, ret_string, ret_line := find_first_table_access(nn.Then)
+			if ok {
+				return true, ret_block, ret_string, ret_line
+			}
+			ok, ret_block, ret_string, ret_line = find_first_table_access(nn.Else)
+			if ok {
+				return true, ret_block, ret_string, ret_line
+			}
+		case *ast.WhileLoop:
+			ok, ret_block, ret_string, ret_line := find_first_table_access(nn.Block)
+			if ok {
+				return true, ret_block, ret_string, ret_line
+			}
+		case *ast.RepeatUntilLoop:
+			ok, ret_block, ret_string, ret_line := find_first_table_access(nn.Block)
+			if ok {
+				return true, ret_block, ret_string, ret_line
+			}
+		case *ast.ForLoopNumeric:
+			ok, ret_block, ret_string, ret_line := find_first_table_access(nn.Block)
+			if ok {
+				return true, ret_block, ret_string, ret_line
+			}
+		case *ast.ForLoopGeneric:
+			ok, ret_block, ret_string, ret_line := find_first_table_access(nn.Block)
+			if ok {
+				return true, ret_block, ret_string, ret_line
+			}
 		}
-	}}
-	for _, stmt := range block {
-		ast.Walk(&f, stmt)
 	}
+	return false, nil, "", 0
+}
 
-	if first_table_access_assign_new_str == "" {
+func opt_func(func_decl *ast.FuncDecl) {
+	first_table_access_assign_new_str := ""
+	first_line := 0
+
+	// find first assign: xxx.yyy.zzz = New()
+	ok, first_block, first_table_access_assign_new_str, first_line := find_first_table_access(func_decl.Block)
+	if !ok {
 		return
 	}
 
 	has_opt = true
 
-	new_table_access_assign_new_str := strings.ReplaceAll(first_table_access_assign_new_str, ".", "_")
-	new_table_access_assign_new_str = strings.ReplaceAll(new_table_access_assign_new_str, ":", "_")
-	new_table_access_assign_new_str = strings.ReplaceAll(new_table_access_assign_new_str, "[", "_")
-	new_table_access_assign_new_str = strings.ReplaceAll(new_table_access_assign_new_str, "]", "_")
-	new_table_access_assign_new_str = strings.ReplaceAll(new_table_access_assign_new_str, "\"", "_")
-	new_table_access_assign_new_str = strings.ReplaceAll(new_table_access_assign_new_str, "'", "_")
+	new_table_access_assign_new_str := table_access_to_local_name(first_table_access_assign_new_str)
 
-	f = lua_visitor{f: func(n ast.Node, ok *bool) {
+	replace_used_table_access(first_block, first_line, first_table_access_assign_new_str, new_table_access_assign_new_str)
+
+	// insert local define
+	insert_line := get_content_space(gfilecontent[first_line-1]) + "local " + new_table_access_assign_new_str + " = " + first_table_access_assign_new_str
+
+	var filecontent []string
+	filecontent = append(filecontent, gfilecontent[:first_line]...)
+	filecontent = append(filecontent, insert_line)
+	filecontent = append(filecontent, gfilecontent[first_line:]...)
+	gfilecontent = filecontent
+}
+
+func get_content_space(content string) string {
+	for index, c := range content {
+		if c != ' ' && c != '\t' {
+			return content[:index]
+		}
+	}
+	return ""
+}
+
+func replace_used_table_access(block []ast.Stmt, first_line int, src string, dst string) {
+
+	f := lua_visitor{f: func(n ast.Node, ok *bool) {
 		if n != nil {
 			line := n.Line()
 			if line > first_line {
-				gfilecontent[line-1] = replace_table_access(gfilecontent[line-1], first_table_access_assign_new_str, new_table_access_assign_new_str)
+				gfilecontent[line-1] = replace_table_access(gfilecontent[line-1], src, dst)
 			}
 		}
 	}}
@@ -189,12 +232,36 @@ func opt_func(func_decl *ast.FuncDecl) {
 		ast.Walk(&f, stmt)
 	}
 
-	// insert local define
-	var filecontent []string
-	filecontent = append(filecontent, gfilecontent[:first_line]...)
-	filecontent = append(filecontent, "local "+new_table_access_assign_new_str+" = "+first_table_access_assign_new_str)
-	filecontent = append(filecontent, gfilecontent[first_line:]...)
-	gfilecontent = filecontent
+}
+
+func table_access_to_local_name(name string) string {
+	ret := strings.ReplaceAll(name, ".", "_")
+	ret = strings.ReplaceAll(ret, ":", "_")
+	ret = strings.ReplaceAll(ret, "[", "_")
+	ret = strings.ReplaceAll(ret, "]", "_")
+	ret = strings.ReplaceAll(ret, "\"", "_")
+	ret = strings.ReplaceAll(ret, "'", "_")
+	return ret
+}
+
+func has_used_table_access(block []ast.Stmt, line int, dst string) bool {
+	ret := false
+	f := lua_visitor{f: func(n ast.Node, ok *bool) {
+		if n != nil {
+			if n.Line() > line {
+				content := gfilecontent[n.Line()-1]
+				if contain_table_access(content, dst) {
+					if !strings.Contains(content, "local "+table_access_to_local_name(dst)+" = "+dst) {
+						ret = true
+					}
+				}
+			}
+		}
+	}}
+	for _, stmt := range block {
+		ast.Walk(&f, stmt)
+	}
+	return ret
 }
 
 func write_file(filename string) {
@@ -206,6 +273,36 @@ func write_file(filename string) {
 	for _, line := range gfilecontent {
 		file.WriteString(line + "\n")
 	}
+}
+
+func contain_table_access(content string, src string) bool {
+	tmp := content
+	begin := 0
+	for {
+		idx := strings.Index(tmp[begin:], src)
+		if idx == -1 {
+			break
+		}
+		idx += begin
+		if idx > 0 {
+			// front must not be . and a-zA-Z0-9_
+			if tmp[idx-1] == '.' || (tmp[idx-1] >= 'a' && tmp[idx-1] <= 'z') || (tmp[idx-1] >= 'A' && tmp[idx-1] <= 'Z') || (tmp[idx-1] >= '0' && tmp[idx-1] <= '9') || tmp[idx-1] == '_' {
+				// use next
+				begin = idx + len(src)
+				continue
+			}
+		}
+		if idx+len(src) < len(tmp) {
+			// back must not be a-zA-Z0-9_
+			if (tmp[idx+len(src)] >= 'a' && tmp[idx+len(src)] <= 'z') || (tmp[idx+len(src)] >= 'A' && tmp[idx+len(src)] <= 'Z') || (tmp[idx+len(src)] >= '0' && tmp[idx+len(src)] <= '9') || tmp[idx+len(src)] == '_' {
+				// use next
+				begin = idx + len(src)
+				continue
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func replace_table_access(content string, src string, dst string) string {
@@ -227,7 +324,7 @@ func replace_table_access(content string, src string, dst string) string {
 		}
 		if idx+len(src) < len(tmp) {
 			// back must not be . and a-zA-Z0-9_
-			if tmp[idx+len(src)] == '.' || (tmp[idx+len(src)] >= 'a' && tmp[idx+len(src)] <= 'z') || (tmp[idx+len(src)] >= 'A' && tmp[idx+len(src)] <= 'Z') || (tmp[idx+len(src)] >= '0' && tmp[idx+len(src)] <= '9') || tmp[idx+len(src)] == '_' {
+			if (tmp[idx+len(src)] >= 'a' && tmp[idx+len(src)] <= 'z') || (tmp[idx+len(src)] >= 'A' && tmp[idx+len(src)] <= 'Z') || (tmp[idx+len(src)] >= '0' && tmp[idx+len(src)] <= '9') || tmp[idx+len(src)] == '_' {
 				// use next
 				begin = idx + len(src)
 				continue
