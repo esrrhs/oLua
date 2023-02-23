@@ -5,31 +5,56 @@ import (
 	"flag"
 	"github.com/milochristiansen/lua/ast"
 	"log"
+	"math"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
 var input = flag.String("input", "input.lua", "Input file")
+var inputpath = flag.String("inputpath", "", "Input path")
 var output = flag.String("output", "output.lua", "Output file")
 
 var has_opt bool
+var gfilename string
 
 func main() {
 	flag.Parse()
 	log.SetFlags(log.Lshortfile)
-	read_file(*input)
-	write_file(*output)
+
+	if *inputpath != "" {
+		opt_path(*inputpath)
+	} else {
+		opt(*input, *output)
+	}
+}
+
+func opt_path(inputpath string) {
+	filepath.Walk(inputpath, func(path string, f os.FileInfo, err error) error {
+		if f.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(path, ".lua") {
+			return nil
+		}
+		log.Println("start opt_path:", path)
+		opt(path, path)
+		return nil
+	})
+}
+
+func opt(input string, output string) {
+	gfilename = input
+	read_file(input)
+	write_file(output)
 	has_opt = true
-	n := 0
 	for has_opt {
 		has_opt = false
-		read_file(*output)
+		read_file(output)
 		parse_lua()
 		opt_lua()
-		write_file(*output)
-		n++
+		write_file(output)
 	}
-	log.Println("n:", n)
 }
 
 var gfilecontent []string
@@ -58,7 +83,7 @@ func parse_lua() {
 
 	block, err := ast.Parse(source, 1)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("%v %v", gfilename, err)
 	}
 	gblock = block
 }
@@ -100,7 +125,46 @@ func opt_lua() {
 	}
 }
 
-func find_first_table_access(block []ast.Stmt) (bool, []ast.Stmt, string, int) {
+func find_end_line(block []ast.Stmt, stmt ast.Stmt) int {
+
+	var next_stmt ast.Stmt
+	for i, s := range block {
+		if s == stmt {
+			if i+1 < len(block) {
+				next_stmt = block[i+1]
+			}
+		}
+	}
+	if next_stmt == nil {
+		start_line := stmt.Line()
+		cur := 0
+		for i := start_line; i < len(gfilecontent); i++ {
+			line := gfilecontent[i-1]
+			left := strings.Count(line, "{")
+			cur += left
+			right := strings.Count(line, "}")
+			cur -= right
+			if cur == 0 {
+				return i + 1
+			}
+		}
+		return len(gfilecontent) + 1
+	} else {
+		minline := math.MaxInt32
+		f := lua_visitor{f: func(n ast.Node, ok *bool) {
+			if n != nil {
+				line := n.Line()
+				if line < minline {
+					minline = line
+				}
+			}
+		}}
+		ast.Walk(&f, next_stmt)
+		return minline
+	}
+}
+
+func find_first_table_access(block []ast.Stmt) (bool, []ast.Stmt, string, int, int) {
 	for _, stmt := range block {
 		switch nn := stmt.(type) {
 		case *ast.Assign:
@@ -126,48 +190,48 @@ func find_first_table_access(block []ast.Stmt) (bool, []ast.Stmt, string, int) {
 						params[0] = strings.TrimSpace(params[0])
 						if has_used_table_access(block, line, params[0]) {
 							log.Println("first_table_access_assign:", params[0], " ", line)
-							return true, block, params[0], line
+							return true, block, params[0], line, find_end_line(block, stmt)
 						}
 					}
 				}
 			}
 		case *ast.DoBlock:
-			ok, ret_block, ret_string, ret_line := find_first_table_access(nn.Block)
+			ok, ret_block, ret_string, ret_line, ret_end_line := find_first_table_access(nn.Block)
 			if ok {
-				return true, ret_block, ret_string, ret_line
+				return true, ret_block, ret_string, ret_line, ret_end_line
 			}
 		case *ast.If:
-			ok, ret_block, ret_string, ret_line := find_first_table_access(nn.Then)
+			ok, ret_block, ret_string, ret_line, ret_end_line := find_first_table_access(nn.Then)
 			if ok {
-				return true, ret_block, ret_string, ret_line
+				return true, ret_block, ret_string, ret_line, ret_end_line
 			}
-			ok, ret_block, ret_string, ret_line = find_first_table_access(nn.Else)
+			ok, ret_block, ret_string, ret_line, ret_end_line = find_first_table_access(nn.Else)
 			if ok {
-				return true, ret_block, ret_string, ret_line
+				return true, ret_block, ret_string, ret_line, ret_end_line
 			}
 		case *ast.WhileLoop:
-			ok, ret_block, ret_string, ret_line := find_first_table_access(nn.Block)
+			ok, ret_block, ret_string, ret_line, ret_end_line := find_first_table_access(nn.Block)
 			if ok {
-				return true, ret_block, ret_string, ret_line
+				return true, ret_block, ret_string, ret_line, ret_end_line
 			}
 		case *ast.RepeatUntilLoop:
-			ok, ret_block, ret_string, ret_line := find_first_table_access(nn.Block)
+			ok, ret_block, ret_string, ret_line, ret_end_line := find_first_table_access(nn.Block)
 			if ok {
-				return true, ret_block, ret_string, ret_line
+				return true, ret_block, ret_string, ret_line, ret_end_line
 			}
 		case *ast.ForLoopNumeric:
-			ok, ret_block, ret_string, ret_line := find_first_table_access(nn.Block)
+			ok, ret_block, ret_string, ret_line, ret_end_line := find_first_table_access(nn.Block)
 			if ok {
-				return true, ret_block, ret_string, ret_line
+				return true, ret_block, ret_string, ret_line, ret_end_line
 			}
 		case *ast.ForLoopGeneric:
-			ok, ret_block, ret_string, ret_line := find_first_table_access(nn.Block)
+			ok, ret_block, ret_string, ret_line, ret_end_line := find_first_table_access(nn.Block)
 			if ok {
-				return true, ret_block, ret_string, ret_line
+				return true, ret_block, ret_string, ret_line, ret_end_line
 			}
 		}
 	}
-	return false, nil, "", 0
+	return false, nil, "", 0, 0
 }
 
 func opt_func(func_decl *ast.FuncDecl) {
@@ -175,7 +239,7 @@ func opt_func(func_decl *ast.FuncDecl) {
 	first_line := 0
 
 	// find first assign: xxx.yyy.zzz = {xxx = yyy}
-	ok, first_block, first_table_access_assign_new_str, first_line := find_first_table_access(func_decl.Block)
+	ok, first_block, first_table_access_assign_new_str, first_line, end_line := find_first_table_access(func_decl.Block)
 	if !ok {
 		return
 	}
@@ -190,10 +254,12 @@ func opt_func(func_decl *ast.FuncDecl) {
 	insert_line := get_content_space(gfilecontent[first_line-1]) + "local " + new_table_access_assign_new_str + " = " + first_table_access_assign_new_str + " -- opt by lua2lua"
 
 	var filecontent []string
-	filecontent = append(filecontent, gfilecontent[:first_line]...)
+	filecontent = append(filecontent, gfilecontent[:end_line-1]...)
 	filecontent = append(filecontent, insert_line)
-	filecontent = append(filecontent, gfilecontent[first_line:]...)
+	filecontent = append(filecontent, gfilecontent[end_line-1:]...)
 	gfilecontent = filecontent
+
+	log.Printf("opt at: %s:%d", gfilename, first_line)
 }
 
 func get_content_space(content string) string {
