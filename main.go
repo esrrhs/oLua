@@ -344,6 +344,9 @@ func table_access_to_local_name(name string) string {
 	ret = strings.ReplaceAll(ret, "]", "_")
 	ret = strings.ReplaceAll(ret, "\"", "_")
 	ret = strings.ReplaceAll(ret, "'", "_")
+	ret = strings.ReplaceAll(ret, "(", "_")
+	ret = strings.ReplaceAll(ret, ")", "_")
+	ret = strings.ReplaceAll(ret, "/", "_")
 	return ret
 }
 
