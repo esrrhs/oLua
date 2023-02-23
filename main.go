@@ -17,6 +17,7 @@ var output = flag.String("output", "output.lua", "Output file")
 
 var has_opt bool
 var gfilename string
+var goptcount int
 
 func main() {
 	flag.Parse()
@@ -38,13 +39,20 @@ func opt_path(inputpath string) {
 			return nil
 		}
 		log.Println("start opt_path:", path)
-		opt(path, path)
+		opt(path, "./tmp.lua")
+		if goptcount > 0 {
+			os.Remove(path)
+			os.Rename("./tmp.lua", path)
+		} else {
+			os.Remove("./tmp.lua")
+		}
 		return nil
 	})
 }
 
 func opt(input string, output string) {
 	gfilename = input
+	goptcount = 0
 	read_file(input)
 	write_file(output)
 	has_opt = true
@@ -128,13 +136,28 @@ func opt_lua() {
 func find_end_line(block []ast.Stmt, stmt ast.Stmt) int {
 
 	var next_stmt ast.Stmt
+	var next_index int
 	for i, s := range block {
 		if s == stmt {
-			if i+1 < len(block) {
-				next_stmt = block[i+1]
-			}
+			next_index = i
 		}
 	}
+
+	for i := next_index + 1; i < len(block); i++ {
+		empty := false
+		switch block[i].(type) {
+		case *ast.DoBlock:
+			if len(block[i].(*ast.DoBlock).Block) == 0 {
+				empty = true
+			}
+			break
+		}
+		if !empty {
+			next_stmt = block[i]
+			break
+		}
+	}
+
 	if next_stmt == nil {
 		start_line := stmt.Line()
 		cur := 0
@@ -179,18 +202,30 @@ func find_first_table_access(block []ast.Stmt) (bool, []ast.Stmt, string, int, i
 			if is_new {
 				switch assign.Targets[0].(type) {
 				case *ast.TableAccessor:
-					line := assign.Targets[0].(*ast.TableAccessor).Line()
-					content := gfilecontent[line-1]
-					content = strings.TrimSpace(content)
-					if strings.HasPrefix(content, "local ") {
-						content = strings.Replace(content, "local ", "", 1)
+					obj := assign.Targets[0].(*ast.TableAccessor).Obj
+					// check obj is _G
+					is_G := false
+					switch obj.(type) {
+					case *ast.ConstIdent:
+						if obj.(*ast.ConstIdent).Value == "_G" {
+							is_G = true
+						}
 					}
-					params := strings.Split(content, "=")
-					if len(params) >= 2 {
-						params[0] = strings.TrimSpace(params[0])
-						if has_used_table_access(block, line, params[0]) {
-							log.Println("first_table_access_assign:", params[0], " ", line)
-							return true, block, params[0], line, find_end_line(block, stmt)
+					if !is_G {
+						line := assign.Targets[0].(*ast.TableAccessor).Line()
+						content := gfilecontent[line-1]
+						content = strings.TrimSpace(content)
+						if strings.HasPrefix(content, "local ") {
+							content = strings.Replace(content, "local ", "", 1)
+						}
+						params := strings.Split(content, "=")
+						if len(params) >= 2 {
+							params[0] = strings.TrimSpace(params[0])
+							if has_used_table_access(block, line, params[0]) {
+								endline := find_end_line(block, stmt)
+								log.Println("first_table_access_assign:", params[0], " ", line, " ", endline)
+								return true, block, params[0], line, endline
+							}
 						}
 					}
 				}
@@ -260,6 +295,7 @@ func opt_func(func_decl *ast.FuncDecl) {
 	gfilecontent = filecontent
 
 	log.Printf("opt at: %s:%d", gfilename, first_line)
+	goptcount++
 }
 
 func get_content_space(content string) string {
