@@ -108,18 +108,8 @@ func find_first_table_access(block []ast.Stmt) (bool, []ast.Stmt, string, int) {
 			is_new := false
 			if len(assign.Values) == 1 {
 				switch assign.Values[0].(type) {
-				case *ast.FuncCall:
-					func_call := assign.Values[0].(*ast.FuncCall)
-					if len(func_call.Args) == 0 {
-						function := func_call.Function
-						switch function.(type) {
-						case *ast.ConstIdent:
-							ident := function.(*ast.ConstIdent)
-							if ident.Value == "New" {
-								is_new = true
-							}
-						}
-					}
+				case *ast.TableConstructor:
+					is_new = true
 				}
 			}
 			if is_new {
@@ -132,14 +122,11 @@ func find_first_table_access(block []ast.Stmt) (bool, []ast.Stmt, string, int) {
 						content = strings.Replace(content, "local ", "", 1)
 					}
 					params := strings.Split(content, "=")
-					if len(params) == 2 {
+					if len(params) >= 2 {
 						params[0] = strings.TrimSpace(params[0])
-						params[1] = strings.TrimSpace(params[1])
-						if params[1] == "New()" {
-							if has_used_table_access(block, line, params[0]) {
-								log.Println("first_table_access_assign:", params[0], " ", line)
-								return true, block, params[0], line
-							}
+						if has_used_table_access(block, line, params[0]) {
+							log.Println("first_table_access_assign:", params[0], " ", line)
+							return true, block, params[0], line
 						}
 					}
 				}
@@ -187,7 +174,7 @@ func opt_func(func_decl *ast.FuncDecl) {
 	first_table_access_assign_new_str := ""
 	first_line := 0
 
-	// find first assign: xxx.yyy.zzz = New()
+	// find first assign: xxx.yyy.zzz = {xxx = yyy}
 	ok, first_block, first_table_access_assign_new_str, first_line := find_first_table_access(func_decl.Block)
 	if !ok {
 		return
