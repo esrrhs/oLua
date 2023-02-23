@@ -211,7 +211,21 @@ func find_first_table_access(block []ast.Stmt) (bool, []ast.Stmt, string, int, i
 							is_G = true
 						}
 					}
-					if !is_G {
+
+					has_len := false
+					f := lua_visitor{f: func(n ast.Node, ok *bool) {
+						if n != nil {
+							switch n.(type) {
+							case *ast.Operator:
+								if n.(*ast.Operator).Op == ast.OpLength {
+									has_len = true
+								}
+							}
+						}
+					}}
+					ast.Walk(&f, assign.Targets[0])
+
+					if !is_G && !has_len {
 						line := assign.Targets[0].(*ast.TableAccessor).Line()
 						content := gfilecontent[line-1]
 						content = strings.TrimSpace(content)
