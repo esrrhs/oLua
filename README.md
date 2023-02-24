@@ -7,7 +7,7 @@
 
 ## 优化点
 - [x] 优化Lua的table访问
-- [ ] 优化Lua的table构造
+- [x] 优化Lua的table构造
 - [ ] 优化Lua的字符串拼接
 
 ## 优化Lua的table访问
@@ -27,17 +27,34 @@ a_b.data2 = "2"
 a_b.data3 = "3"
 ```
 
+## 优化Lua的table构造
+例如如下代码：
+```lua
+local a = {}
+a.b = 1
+a["c"] = 2
+a[3] = 3
+```
+每次往a中添加元素可能会触发table的扩容，所以可以优化为：
+```lua
+local a = {["b"] = 1, ["c"] = 2, [3] = 3}
+```
+
 ## 使用
 编译：
 ```bash
 go mod tidy
 go build
 ```
-运行，优化单个文件：
+运行，优化单个文件的table访问：
 ```bash
-./oLua -input input.lua -output output.lua
+./oLua -input input_table_access.lua -output output_table_access.lua -opt_table_access
 ```
-运行，优化目录下所有文件，原地替换：
+运行，优化单个文件的table构造：
 ```bash
-./oLua -inputpath input_dir
+./oLua -input input_table_construct.lua -output output_table_construct.lua -opt_table_construct
+```
+也可以优化目录下的所有文件，原地替换：
+```bash
+./oLua -inputpath input_dir -opt_table_access -opt_table_construct
 ```
