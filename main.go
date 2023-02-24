@@ -420,6 +420,8 @@ func get_used_table_constructor_assign(block []ast.Stmt, assign_stmt ast.Stmt) i
 			}
 			if has_use {
 				use_count++
+			} else {
+				break
 			}
 		}
 	}
