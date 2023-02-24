@@ -443,7 +443,7 @@ func opt_func_table_constructor(func_decl *ast.FuncDecl) {
 
 	content := gfilecontent[start_line-1]
 	left_content := content[:strings.Index(content, "=")]
-	insert_line := left_content + " = {" + strings.Join(new_cons, ", ") + "}"
+	insert_line := left_content + " = {" + strings.Join(new_cons, ", ") + "}" + " -- opt by oLua"
 
 	var filecontent []string
 	filecontent = append(filecontent, gfilecontent[:start_line-1]...)
@@ -516,7 +516,7 @@ func opt_func_table_access(func_decl *ast.FuncDecl) {
 	replace_used_table_access(first_block, first_line, first_table_access_assign_new_str, new_table_access_assign_new_str)
 
 	// insert local define
-	insert_line := get_content_space(gfilecontent[first_line-1]) + "local " + new_table_access_assign_new_str + " = " + first_table_access_assign_new_str + " -- opt by lua2lua"
+	insert_line := get_content_space(gfilecontent[first_line-1]) + "local " + new_table_access_assign_new_str + " = " + first_table_access_assign_new_str + " -- opt by oLua"
 
 	var filecontent []string
 	filecontent = append(filecontent, gfilecontent[:end_line-1]...)

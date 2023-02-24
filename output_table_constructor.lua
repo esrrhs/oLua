@@ -6,7 +6,7 @@ function test()
 
         local b = 4
 
-        local a  = {['b'] =  {}, ['c'] =  2, [3] =  3, [b] =  4}
+        local a  = {['b'] =  {}, ['c'] =  2, [3] =  3, [b] =  4} -- opt by oLua
         a.b.c = 5
 
     end
