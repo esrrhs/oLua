@@ -48,11 +48,11 @@ go build
 ```
 运行，优化单个文件的table访问：
 ```bash
-./oLua -input input_table_access.lua -output output_table_access.lua -opt_table_access
+./oLua -input input/table_access.lua -output output/table_access.lua -opt_table_access
 ```
 运行，优化单个文件的table构造：
 ```bash
-./oLua -input input_table_construct.lua -output output_table_construct.lua -opt_table_construct
+./oLua -input input/table_construct.lua -output output/table_construct.lua -opt_table_construct
 ```
 也可以优化目录下的所有文件，原地替换：
 ```bash
