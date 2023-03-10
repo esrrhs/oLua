@@ -69,10 +69,10 @@ go build
 ## 效果
 使用Lua执行input、output目录下的lua文件，看运行所需的时间。
 
-|   | 优化前 | 优化后 |  
-|---|-----|-----|
-| table访问 |   19.07  |  11.0  |  
-| table构造 |  1.8   |   1.02  |  
+|   | 优化前   | 优化后  |  
+|---|-------|------|
+| table访问 | 19.07 | 11.0 |  
+| table构造 | 3.3   | 1.9  |  
 
 ## 其他
 [lua全家桶](https://github.com/esrrhs/lua-family-bucket)
