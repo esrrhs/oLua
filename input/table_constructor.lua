@@ -14,7 +14,7 @@ function test()
         a.d = { e = 6 }
         a.d.f = 7
         a.d[1] = 8
-        a.e = f() or 0
+        a.e = os.time() or 0
         a.f = {
             1, 2, 3
         }

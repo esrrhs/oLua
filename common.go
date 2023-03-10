@@ -199,7 +199,16 @@ func expr_to_string(expr ast.Expr) string {
 			expr_str = expr_to_string(expr.(*ast.TableAccessor).Obj) + "[" + expr_to_string(expr.(*ast.TableAccessor).Key) + "]"
 		}
 	case *ast.FuncCall:
-		expr_str = expr_to_string(expr.(*ast.FuncCall).Function) + "("
+		if expr.(*ast.FuncCall).Receiver != nil {
+			expr_str = expr_to_string(expr.(*ast.FuncCall).Receiver) + ":"
+		}
+		switch expr.(*ast.FuncCall).Function.(type) {
+		case *ast.ConstString:
+			expr_str += expr.(*ast.FuncCall).Function.(*ast.ConstString).Value
+		default:
+			expr_str += expr_to_string(expr.(*ast.FuncCall).Function)
+		}
+		expr_str += "("
 		for i, arg := range expr.(*ast.FuncCall).Args {
 			if i > 0 {
 				expr_str += ","
@@ -307,7 +316,8 @@ func can_expr_to_string(expr ast.Expr) bool {
 	case *ast.TableAccessor:
 		ret = can_expr_to_string(expr.(*ast.TableAccessor).Obj) && can_expr_to_string(expr.(*ast.TableAccessor).Key)
 	case *ast.FuncCall:
-		ret = can_expr_to_string(expr.(*ast.FuncCall).Function)
+		ret = can_expr_to_string(expr.(*ast.FuncCall).Receiver)
+		ret = ret && can_expr_to_string(expr.(*ast.FuncCall).Function)
 		for _, arg := range expr.(*ast.FuncCall).Args {
 			ret = ret && can_expr_to_string(arg)
 		}
