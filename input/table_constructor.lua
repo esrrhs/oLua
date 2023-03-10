@@ -1,3 +1,7 @@
+local function tmp()
+    return 1
+end
+
 function test()
 
     local begin = os.clock()
@@ -20,6 +24,7 @@ function test()
         }
         a.g = "str" .. " " .. i
         a.h = (2 + 3) * 2 - 1
+        a.i = tmp()
         a.b.c = 9
 
     end

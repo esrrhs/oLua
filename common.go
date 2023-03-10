@@ -316,7 +316,9 @@ func can_expr_to_string(expr ast.Expr) bool {
 	case *ast.TableAccessor:
 		ret = can_expr_to_string(expr.(*ast.TableAccessor).Obj) && can_expr_to_string(expr.(*ast.TableAccessor).Key)
 	case *ast.FuncCall:
-		ret = can_expr_to_string(expr.(*ast.FuncCall).Receiver)
+		if expr.(*ast.FuncCall).Receiver != nil {
+			ret = can_expr_to_string(expr.(*ast.FuncCall).Receiver)
+		}
 		ret = ret && can_expr_to_string(expr.(*ast.FuncCall).Function)
 		for _, arg := range expr.(*ast.FuncCall).Args {
 			ret = ret && can_expr_to_string(arg)
