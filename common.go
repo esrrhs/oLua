@@ -110,3 +110,79 @@ func get_content_space(content string) string {
 	}
 	return ""
 }
+
+func expr_to_string(expr ast.Expr) string {
+	expr_str := ""
+	switch expr.(type) {
+	case *ast.ConstIdent:
+		expr_str = expr.(*ast.ConstIdent).Value
+	case *ast.TableAccessor:
+		expr_str = expr_to_string(expr.(*ast.TableAccessor).Obj) + "." + expr_to_string(expr.(*ast.TableAccessor).Key)
+	case *ast.FuncCall:
+		expr_str = expr_to_string(expr.(*ast.FuncCall).Function) + "("
+		for i, arg := range expr.(*ast.FuncCall).Args {
+			if i > 0 {
+				expr_str += ","
+			}
+			expr_str += expr_to_string(arg)
+		}
+		expr_str += ")"
+	case *ast.TableConstructor:
+		expr_str = "{"
+		for i, field := range expr.(*ast.TableConstructor).Keys {
+			if i > 0 {
+				expr_str += ","
+			}
+			expr_str += expr_to_string(field)
+			expr_str += "="
+			expr_str += expr_to_string(expr.(*ast.TableConstructor).Vals[i])
+		}
+		expr_str += "}"
+	case *ast.ConstString:
+		expr_str = expr.(*ast.ConstString).Value
+	case *ast.ConstInt:
+		expr_str = expr.(*ast.ConstInt).Value
+	case *ast.ConstFloat:
+		expr_str = expr.(*ast.ConstFloat).Value
+	case *ast.ConstNil:
+		expr_str = "nil"
+	case *ast.ConstBool:
+		if expr.(*ast.ConstBool).Value {
+			expr_str = "true"
+		} else {
+			expr_str = "false"
+		}
+	}
+	return expr_str
+}
+
+func can_expr_to_string(expr ast.Expr) bool {
+	ret := false
+	switch expr.(type) {
+	case *ast.ConstIdent:
+		ret = true
+	case *ast.TableAccessor:
+		ret = can_expr_to_string(expr.(*ast.TableAccessor).Obj) && can_expr_to_string(expr.(*ast.TableAccessor).Key)
+	case *ast.FuncCall:
+		ret = can_expr_to_string(expr.(*ast.FuncCall).Function)
+		for _, arg := range expr.(*ast.FuncCall).Args {
+			ret = ret && can_expr_to_string(arg)
+		}
+	case *ast.TableConstructor:
+		for i, field := range expr.(*ast.TableConstructor).Keys {
+			ret = ret && can_expr_to_string(field)
+			ret = ret && can_expr_to_string(expr.(*ast.TableConstructor).Vals[i])
+		}
+	case *ast.ConstString:
+		ret = true
+	case *ast.ConstInt:
+		ret = true
+	case *ast.ConstFloat:
+		ret = true
+	case *ast.ConstNil:
+		ret = true
+	case *ast.ConstBool:
+		ret = true
+	}
+	return ret
+}

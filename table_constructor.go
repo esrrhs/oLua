@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"github.com/milochristiansen/lua/ast"
 	"log"
 	"strings"
@@ -16,8 +15,7 @@ func find_first_table_constructor(block []ast.Stmt) (bool, []ast.Stmt, ast.Stmt,
 			if len(assign.Values) == 1 {
 				switch assign.Values[0].(type) {
 				case *ast.TableConstructor:
-					tc := assign.Values[0].(*ast.TableConstructor)
-					if len(tc.Keys) == 0 && len(tc.Vals) == 0 {
+					if can_expr_to_string(assign.Targets[0]) {
 						is_new = true
 					}
 				}
@@ -124,7 +122,7 @@ func opt_func_table_constructor(func_decl *ast.FuncDecl) {
 
 	content := gfilecontent[start_line-1]
 	left_content := content[:strings.Index(content, "=")]
-	insert_line := left_content + " = {" + strings.Join(new_cons, ", ") + "}" + " -- opt by oLua"
+	insert_line := strings.TrimRight(left_content, " ") + " = {" + strings.Join(new_cons, ", ") + "}" + " -- opt by oLua"
 
 	var filecontent []string
 	filecontent = append(filecontent, gfilecontent[:start_line-1]...)
@@ -137,6 +135,21 @@ func opt_func_table_constructor(func_decl *ast.FuncDecl) {
 }
 
 func replace_table_constructor_used(block []ast.Stmt, assign_stmt ast.Stmt, used_count int) []string {
+	var new_keys []ast.Expr
+	var new_vals []ast.Expr
+
+	old_value := assign_stmt.(*ast.Assign).Values[0]
+	switch old_value.(type) {
+	case *ast.TableConstructor:
+		old_cons := old_value.(*ast.TableConstructor)
+		for _, k := range old_cons.Keys {
+			new_keys = append(new_keys, k)
+		}
+		for _, v := range old_cons.Vals {
+			new_vals = append(new_vals, v)
+		}
+	}
+
 	next := false
 	c := 0
 	var ret []string
@@ -155,27 +168,29 @@ func replace_table_constructor_used(block []ast.Stmt, assign_stmt ast.Stmt, used
 						switch assign.Targets[0].(type) {
 						case *ast.TableAccessor:
 							accessor := assign.Targets[0].(*ast.TableAccessor)
-							content := gfilecontent[stmt.Line()-1]
-							pot := strings.Index(content, "=")
-							if pot > 0 {
-								right := content[pot+1:]
-								switch accessor.Key.(type) {
-								case *ast.ConstIdent:
-									key := accessor.Key.(*ast.ConstIdent).Value
-									ret = append(ret, fmt.Sprintf("[%s] = %s", key, right))
-								case *ast.ConstString:
-									key := accessor.Key.(*ast.ConstString).Value
-									ret = append(ret, fmt.Sprintf("['%s'] = %s", key, right))
-								case *ast.ConstInt:
-									key := accessor.Key.(*ast.ConstInt).Value
-									ret = append(ret, fmt.Sprintf("[%s] = %s", key, right))
-								}
-							}
+							new_keys = append(new_keys, accessor.Key)
+							new_vals = append(new_vals, assign.Values[0])
 						}
 					}
 				}
 			}
 		}
 	}
+
+	for i, k := range new_keys {
+		if k == nil {
+			ret = append(ret, expr_to_string(new_vals[i]))
+			continue
+		}
+		switch k.(type) {
+		case *ast.ConstIdent:
+			ret = append(ret, "["+k.(*ast.ConstIdent).Value+"]="+expr_to_string(new_vals[i]))
+		case *ast.ConstString:
+			ret = append(ret, "['"+k.(*ast.ConstString).Value+"']="+expr_to_string(new_vals[i]))
+		case *ast.ConstInt:
+			ret = append(ret, "["+k.(*ast.ConstInt).Value+"]="+expr_to_string(new_vals[i]))
+		}
+	}
+
 	return ret
 }

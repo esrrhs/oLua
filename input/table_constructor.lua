@@ -6,12 +6,13 @@ function test()
 
         local b = 4
 
-        local a = {}
+        local a = { a = 1, 2 }
         a.b = {}
-        a["c"] = 2
-        a[3] = 3
-        a[b] = 4
-        a.b.c = 5
+        a["c"] = 3
+        a[3] = 4
+        a[b] = 5
+        a.d = { e = 6 }
+        a.b.c = 7
 
     end
 

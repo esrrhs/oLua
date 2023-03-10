@@ -14,30 +14,36 @@
 例如如下代码：
 ```lua
 a.b = {}
-a.b.data1 = "1"
-a.b.data2 = "2"
-a.b.data3 = "3"
+if a.c then
+    a.b.data1 = "1"
+    a.b.data2 = "2"
+    a.b.data3 = "3"
+end
 ```
 a.b是一个table，每次访问a.b都会触发一次table的访问，这样会影响性能，所以可以优化为：
 ```lua
 a.b = {}
 local a_b = a.b
-a_b.data1 = "1"
-a_b.data2 = "2"
-a_b.data3 = "3"
+if a.c then
+    a_b.data1 = "1"
+    a_b.data2 = "2"
+    a_b.data3 = "3"
+end
 ```
+**注意：这里做了一个假设推断，当对一个a.b赋值构造的table后，就不会再更改a.b为其他table或者其他类型。只针对符合这种假设的推断的代码才优化。**
 
 ## 优化Lua的table构造
 例如如下代码：
 ```lua
-local a = {}
+local a = { a = 1, 2}
 a.b = 1
 a["c"] = 2
 a[3] = 3
+a.d = { e = 4}
 ```
 每次往a中添加元素可能会触发table的扩容，所以可以优化为：
 ```lua
-local a = {["b"] = 1, ["c"] = 2, [3] = 3}
+local a = {['a']=1, 2, ['b']=1, ['c']=2, [3]=3, ['d']={e=4}}
 ```
 
 ## 使用
