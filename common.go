@@ -194,7 +194,7 @@ func expr_to_string(expr ast.Expr) string {
 	case *ast.TableAccessor:
 		switch expr.(*ast.TableAccessor).Key.(type) {
 		case *ast.ConstString:
-			expr_str = expr_to_string(expr.(*ast.TableAccessor).Obj) + "['" + expr_to_string(expr.(*ast.TableAccessor).Key) + "']"
+			expr_str = expr_to_string(expr.(*ast.TableAccessor).Obj) + "." + expr.(*ast.TableAccessor).Key.(*ast.ConstString).Value
 		default:
 			expr_str = expr_to_string(expr.(*ast.TableAccessor).Obj) + "[" + expr_to_string(expr.(*ast.TableAccessor).Key) + "]"
 		}
@@ -218,7 +218,7 @@ func expr_to_string(expr ast.Expr) string {
 				case *ast.ConstIdent:
 					expr_str += "[" + field.(*ast.ConstIdent).Value + "]"
 				case *ast.ConstString:
-					expr_str += "['" + field.(*ast.ConstString).Value + "']"
+					expr_str += field.(*ast.ConstString).Value
 				case *ast.ConstInt:
 					expr_str += "[" + field.(*ast.ConstInt).Value + "]"
 				}
@@ -228,7 +228,7 @@ func expr_to_string(expr ast.Expr) string {
 		}
 		expr_str += "}"
 	case *ast.ConstString:
-		expr_str = expr.(*ast.ConstString).Value
+		expr_str = "'" + expr.(*ast.ConstString).Value + "'"
 	case *ast.ConstInt:
 		expr_str = expr.(*ast.ConstInt).Value
 	case *ast.ConstFloat:
@@ -293,6 +293,8 @@ func expr_to_string(expr ast.Expr) string {
 		case ast.OpOr:
 			expr_str = expr_to_string(expr.(*ast.Operator).Left) + " or " + expr_to_string(expr.(*ast.Operator).Right)
 		}
+	case *ast.Parens:
+		expr_str = "(" + expr_to_string(expr.(*ast.Parens).Inner) + ")"
 	}
 	return expr_str
 }
@@ -362,6 +364,8 @@ func can_expr_to_string(expr ast.Expr) bool {
 		default:
 			ret = false
 		}
+	case *ast.Parens:
+		ret = can_expr_to_string(expr.(*ast.Parens).Inner)
 	default:
 		ret = false
 	}

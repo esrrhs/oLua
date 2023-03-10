@@ -196,7 +196,7 @@ func replace_table_constructor_used(block []ast.Stmt, assign_stmt ast.Stmt, used
 		case *ast.ConstIdent:
 			ret = append(ret, "["+k.(*ast.ConstIdent).Value+"]="+expr_to_string(new_vals[i]))
 		case *ast.ConstString:
-			ret = append(ret, "['"+k.(*ast.ConstString).Value+"']="+expr_to_string(new_vals[i]))
+			ret = append(ret, k.(*ast.ConstString).Value+"="+expr_to_string(new_vals[i]))
 		case *ast.ConstInt:
 			ret = append(ret, "["+k.(*ast.ConstInt).Value+"]="+expr_to_string(new_vals[i]))
 		}

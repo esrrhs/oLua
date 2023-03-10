@@ -118,14 +118,14 @@ func opt_lua() {
 }
 
 func opt_func(func_decl *ast.FuncDecl) {
-	if *opt_table_access {
-		opt_func_table_access(func_decl)
+	if *opt_table_constructor {
+		opt_func_table_constructor(func_decl)
 		if has_opt {
 			return
 		}
 	}
-	if *opt_table_constructor {
-		opt_func_table_constructor(func_decl)
+	if *opt_table_access {
+		opt_func_table_access(func_decl)
 		if has_opt {
 			return
 		}
