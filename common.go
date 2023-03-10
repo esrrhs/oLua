@@ -208,15 +208,17 @@ func expr_to_string(expr ast.Expr) string {
 			if i > 0 {
 				expr_str += ","
 			}
-			switch field.(type) {
-			case *ast.ConstIdent:
-				expr_str += "[" + field.(*ast.ConstIdent).Value + "]"
-			case *ast.ConstString:
-				expr_str += "['" + field.(*ast.ConstString).Value + "']"
-			case *ast.ConstInt:
-				expr_str += "[" + field.(*ast.ConstInt).Value + "]"
+			if field != nil {
+				switch field.(type) {
+				case *ast.ConstIdent:
+					expr_str += "[" + field.(*ast.ConstIdent).Value + "]"
+				case *ast.ConstString:
+					expr_str += "['" + field.(*ast.ConstString).Value + "']"
+				case *ast.ConstInt:
+					expr_str += "[" + field.(*ast.ConstInt).Value + "]"
+				}
+				expr_str += "="
 			}
-			expr_str += "="
 			expr_str += expr_to_string(expr.(*ast.TableConstructor).Vals[i])
 		}
 		expr_str += "}"
@@ -234,12 +236,64 @@ func expr_to_string(expr ast.Expr) string {
 		} else {
 			expr_str = "false"
 		}
+	case *ast.Operator:
+		op := expr.(*ast.Operator).Op
+		switch op {
+		case ast.OpAdd:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + "+" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpSub:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + "-" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpMul:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + "*" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpMod:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + "%" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpPow:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + "^" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpDiv:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + ".." + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpBinAND:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + "&" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpBinOR:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + "|" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpBinXOR:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + "~" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpBinShiftL:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + "<<" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpBinShiftR:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + ">>" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpUMinus:
+			expr_str = "-" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpBinNot:
+			expr_str = "~" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpNot:
+			expr_str = "not " + expr_to_string(expr.(*ast.Operator).Left)
+		case ast.OpLength:
+			expr_str = "#" + expr_to_string(expr.(*ast.Operator).Left)
+		case ast.OpConcat:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + ".." + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpEqual:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + "==" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpNotEqual:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + "~=" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpLessThan:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + "<" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpGreaterThan:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + ">" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpLessOrEqual:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + "<=" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpGreaterOrEqual:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + ">=" + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpAnd:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + " and " + expr_to_string(expr.(*ast.Operator).Right)
+		case ast.OpOr:
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + " or " + expr_to_string(expr.(*ast.Operator).Right)
+		}
 	}
 	return expr_str
 }
 
 func can_expr_to_string(expr ast.Expr) bool {
-	ret := false
+	ret := true
 	switch expr.(type) {
 	case *ast.ConstIdent:
 		ret = true
@@ -251,6 +305,9 @@ func can_expr_to_string(expr ast.Expr) bool {
 			ret = ret && can_expr_to_string(arg)
 		}
 	case *ast.TableConstructor:
+		if len(expr.(*ast.TableConstructor).Keys) == 0 {
+			ret = true
+		}
 		for i, field := range expr.(*ast.TableConstructor).Keys {
 			switch field.(type) {
 			case *ast.ConstIdent:
@@ -271,6 +328,38 @@ func can_expr_to_string(expr ast.Expr) bool {
 		ret = true
 	case *ast.ConstBool:
 		ret = true
+	case *ast.Operator:
+		op := expr.(*ast.Operator).Op
+		switch op {
+		case ast.OpAdd:
+		case ast.OpSub:
+		case ast.OpMul:
+		case ast.OpMod:
+		case ast.OpPow:
+		case ast.OpDiv:
+		case ast.OpBinAND:
+		case ast.OpBinOR:
+		case ast.OpBinXOR:
+		case ast.OpBinShiftL:
+		case ast.OpBinShiftR:
+		case ast.OpUMinus:
+		case ast.OpBinNot:
+		case ast.OpNot:
+		case ast.OpLength:
+		case ast.OpConcat:
+		case ast.OpEqual:
+		case ast.OpNotEqual:
+		case ast.OpLessThan:
+		case ast.OpGreaterThan:
+		case ast.OpLessOrEqual:
+		case ast.OpGreaterOrEqual:
+		case ast.OpAnd:
+		case ast.OpOr:
+		default:
+			ret = false
+		}
+	default:
+		ret = false
 	}
 	return ret
 }

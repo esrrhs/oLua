@@ -89,13 +89,15 @@ func get_used_table_constructor_assign(block []ast.Stmt, assign_stmt ast.Stmt) i
 						accessor := assign.Targets[0].(*ast.TableAccessor)
 						obj := accessor.Obj
 						if check_expr_same(obj, target) {
-							switch accessor.Key.(type) {
-							case *ast.ConstIdent:
-								has_use = true
-							case *ast.ConstString:
-								has_use = true
-							case *ast.ConstInt:
-								has_use = true
+							if can_expr_to_string(assign.Values[0]) {
+								switch accessor.Key.(type) {
+								case *ast.ConstIdent:
+									has_use = true
+								case *ast.ConstString:
+									has_use = true
+								case *ast.ConstInt:
+									has_use = true
+								}
 							}
 						}
 					}
