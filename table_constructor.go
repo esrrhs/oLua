@@ -6,11 +6,12 @@ import (
 	"strings"
 )
 
-func find_last_table_constructor(block []ast.Stmt) (bool, []ast.Stmt, ast.Stmt, int) {
+func find_last_table_constructor(block []ast.Stmt) (bool, []ast.Stmt, ast.Stmt, int, int) {
 	var r_ok bool
 	var r_block []ast.Stmt
 	var r_stmt ast.Stmt
 	var r_used_count int
+	var r_end_line int
 	for _, stmt := range block {
 		switch nn := stmt.(type) {
 		case *ast.Assign:
@@ -25,54 +26,55 @@ func find_last_table_constructor(block []ast.Stmt) (bool, []ast.Stmt, ast.Stmt, 
 				}
 			}
 			if is_new {
-				used_count := get_used_table_constructor_assign(block, stmt)
+				used_count, end_line := get_used_table_constructor_assign(block, stmt)
 				if used_count > 0 {
-					r_ok, r_block, r_stmt, r_used_count = true, block, stmt, used_count
+					r_ok, r_block, r_stmt, r_used_count, r_end_line = true, block, stmt, used_count, end_line
 				}
 			}
 		case *ast.DoBlock:
-			ok, ret_block, ret_stmt, ret_used_count := find_last_table_constructor(nn.Block)
+			ok, ret_block, ret_stmt, ret_used_count, ret_end_line := find_last_table_constructor(nn.Block)
 			if ok {
-				r_ok, r_block, r_stmt, r_used_count = true, ret_block, ret_stmt, ret_used_count
+				r_ok, r_block, r_stmt, r_used_count, r_end_line = true, ret_block, ret_stmt, ret_used_count, ret_end_line
 			}
 		case *ast.If:
-			ok, ret_block, ret_stmt, ret_used_count := find_last_table_constructor(nn.Then)
+			ok, ret_block, ret_stmt, ret_used_count, ret_end_line := find_last_table_constructor(nn.Then)
 			if ok {
-				r_ok, r_block, r_stmt, r_used_count = true, ret_block, ret_stmt, ret_used_count
+				r_ok, r_block, r_stmt, r_used_count, r_end_line = true, ret_block, ret_stmt, ret_used_count, ret_end_line
 			}
-			ok, ret_block, ret_stmt, ret_used_count = find_last_table_constructor(nn.Else)
+			ok, ret_block, ret_stmt, ret_used_count, ret_end_line = find_last_table_constructor(nn.Else)
 			if ok {
-				r_ok, r_block, r_stmt, r_used_count = true, ret_block, ret_stmt, ret_used_count
+				r_ok, r_block, r_stmt, r_used_count, r_end_line = true, ret_block, ret_stmt, ret_used_count, ret_end_line
 			}
 		case *ast.WhileLoop:
-			ok, ret_block, ret_stmt, ret_used_count := find_last_table_constructor(nn.Block)
+			ok, ret_block, ret_stmt, ret_used_count, ret_end_line := find_last_table_constructor(nn.Block)
 			if ok {
-				r_ok, r_block, r_stmt, r_used_count = true, ret_block, ret_stmt, ret_used_count
+				r_ok, r_block, r_stmt, r_used_count, r_end_line = true, ret_block, ret_stmt, ret_used_count, ret_end_line
 			}
 		case *ast.RepeatUntilLoop:
-			ok, ret_block, ret_stmt, ret_used_count := find_last_table_constructor(nn.Block)
+			ok, ret_block, ret_stmt, ret_used_count, ret_end_line := find_last_table_constructor(nn.Block)
 			if ok {
-				r_ok, r_block, r_stmt, r_used_count = true, ret_block, ret_stmt, ret_used_count
+				r_ok, r_block, r_stmt, r_used_count, r_end_line = true, ret_block, ret_stmt, ret_used_count, ret_end_line
 			}
 		case *ast.ForLoopNumeric:
-			ok, ret_block, ret_stmt, ret_used_count := find_last_table_constructor(nn.Block)
+			ok, ret_block, ret_stmt, ret_used_count, ret_end_line := find_last_table_constructor(nn.Block)
 			if ok {
-				r_ok, r_block, r_stmt, r_used_count = true, ret_block, ret_stmt, ret_used_count
+				r_ok, r_block, r_stmt, r_used_count, r_end_line = true, ret_block, ret_stmt, ret_used_count, ret_end_line
 			}
 		case *ast.ForLoopGeneric:
-			ok, ret_block, ret_stmt, ret_used_count := find_last_table_constructor(nn.Block)
+			ok, ret_block, ret_stmt, ret_used_count, ret_end_line := find_last_table_constructor(nn.Block)
 			if ok {
-				r_ok, r_block, r_stmt, r_used_count = true, ret_block, ret_stmt, ret_used_count
+				r_ok, r_block, r_stmt, r_used_count, r_end_line = true, ret_block, ret_stmt, ret_used_count, ret_end_line
 			}
 		}
 	}
-	return r_ok, r_block, r_stmt, r_used_count
+	return r_ok, r_block, r_stmt, r_used_count, r_end_line
 }
 
-func get_used_table_constructor_assign(block []ast.Stmt, assign_stmt ast.Stmt) int {
+func get_used_table_constructor_assign(block []ast.Stmt, assign_stmt ast.Stmt) (int, int) {
 	target := assign_stmt.(*ast.Assign).Targets[0]
 	use_count := 0
 	next := false
+	var last_value ast.Node
 	for _, stmt := range block {
 		if stmt == assign_stmt {
 			next = true
@@ -98,6 +100,7 @@ func get_used_table_constructor_assign(block []ast.Stmt, assign_stmt ast.Stmt) i
 								case *ast.ConstInt:
 									has_use = true
 								}
+								last_value = assign.Values[0]
 							}
 						}
 					}
@@ -110,11 +113,12 @@ func get_used_table_constructor_assign(block []ast.Stmt, assign_stmt ast.Stmt) i
 			}
 		}
 	}
-	return use_count
+	_, end_line := find_stmt_line_range(last_value)
+	return use_count, end_line
 }
 
 func opt_func_table_constructor(func_decl *ast.FuncDecl) {
-	ok, ret_block, ret_stmt, ret_used_count := find_last_table_constructor(func_decl.Block)
+	ok, ret_block, ret_stmt, ret_used_count, ret_end_line := find_last_table_constructor(func_decl.Block)
 	if !ok {
 		return
 	}
@@ -133,7 +137,7 @@ func opt_func_table_constructor(func_decl *ast.FuncDecl) {
 	var filecontent []string
 	filecontent = append(filecontent, gfilecontent[:start_line-1]...)
 	filecontent = append(filecontent, insert_line)
-	filecontent = append(filecontent, gfilecontent[start_line+ret_used_count:]...)
+	filecontent = append(filecontent, gfilecontent[start_line+ret_end_line-start_line:]...)
 	gfilecontent = filecontent
 
 	log.Printf("opt at: %s:%d", gfilename, start_line)

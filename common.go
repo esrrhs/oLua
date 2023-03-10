@@ -367,3 +367,54 @@ func can_expr_to_string(expr ast.Expr) bool {
 	}
 	return ret
 }
+
+func find_stmt_line_range(stmt ast.Node) (int, int) {
+
+	min_line := math.MaxInt32
+	max_line := -1
+
+	f := lua_visitor{f: func(n ast.Node, ok *bool) {
+		if n != nil {
+			line := n.Line()
+			if line > max_line {
+				max_line = line
+			}
+			if line < min_line {
+				min_line = line
+			}
+		}
+	}}
+
+	ast.Walk(&f, stmt)
+
+	if min_line == math.MaxInt32 {
+		return -1, -1
+	}
+
+	switch stmt.(type) {
+	case *ast.FuncCall:
+		// find last )
+		num := 0
+		for i := min_line; i <= len(gfilecontent); i++ {
+			num += strings.Count(gfilecontent[i-1], "(")
+			num -= strings.Count(gfilecontent[i-1], ")")
+			if num == 0 {
+				max_line = i
+				break
+			}
+		}
+	case *ast.TableConstructor:
+		// find last }
+		num := 0
+		for i := min_line; i <= len(gfilecontent); i++ {
+			num += strings.Count(gfilecontent[i-1], "{")
+			num -= strings.Count(gfilecontent[i-1], "}")
+			if num == 0 {
+				max_line = i
+				break
+			}
+		}
+	}
+
+	return min_line, max_line
+}
