@@ -192,7 +192,12 @@ func expr_to_string(expr ast.Expr) string {
 	case *ast.ConstIdent:
 		expr_str = expr.(*ast.ConstIdent).Value
 	case *ast.TableAccessor:
-		expr_str = expr_to_string(expr.(*ast.TableAccessor).Obj) + "." + expr_to_string(expr.(*ast.TableAccessor).Key)
+		switch expr.(*ast.TableAccessor).Key.(type) {
+		case *ast.ConstString:
+			expr_str = expr_to_string(expr.(*ast.TableAccessor).Obj) + "['" + expr_to_string(expr.(*ast.TableAccessor).Key) + "']"
+		default:
+			expr_str = expr_to_string(expr.(*ast.TableAccessor).Obj) + "[" + expr_to_string(expr.(*ast.TableAccessor).Key) + "]"
+		}
 	case *ast.FuncCall:
 		expr_str = expr_to_string(expr.(*ast.FuncCall).Function) + "("
 		for i, arg := range expr.(*ast.FuncCall).Args {
@@ -305,16 +310,15 @@ func can_expr_to_string(expr ast.Expr) bool {
 			ret = ret && can_expr_to_string(arg)
 		}
 	case *ast.TableConstructor:
-		if len(expr.(*ast.TableConstructor).Keys) == 0 {
-			ret = true
-		}
 		for i, field := range expr.(*ast.TableConstructor).Keys {
-			switch field.(type) {
-			case *ast.ConstIdent:
-			case *ast.ConstString:
-			case *ast.ConstInt:
-			default:
-				return false
+			if field != nil {
+				switch field.(type) {
+				case *ast.ConstIdent:
+				case *ast.ConstString:
+				case *ast.ConstInt:
+				default:
+					return false
+				}
 			}
 			ret = ret && can_expr_to_string(expr.(*ast.TableConstructor).Vals[i])
 		}

@@ -15,6 +15,7 @@ function test()
         a.d.f = 7
         a.d[1] = 8
         a.e = f() or 0
+        a.f = { 1,2,3 }
         a.b.c = 9
 
     end
