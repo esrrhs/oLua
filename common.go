@@ -208,7 +208,14 @@ func expr_to_string(expr ast.Expr) string {
 			if i > 0 {
 				expr_str += ","
 			}
-			expr_str += expr_to_string(field)
+			switch field.(type) {
+			case *ast.ConstIdent:
+				expr_str += "[" + field.(*ast.ConstIdent).Value + "]"
+			case *ast.ConstString:
+				expr_str += "['" + field.(*ast.ConstString).Value + "']"
+			case *ast.ConstInt:
+				expr_str += "[" + field.(*ast.ConstInt).Value + "]"
+			}
 			expr_str += "="
 			expr_str += expr_to_string(expr.(*ast.TableConstructor).Vals[i])
 		}
@@ -245,7 +252,13 @@ func can_expr_to_string(expr ast.Expr) bool {
 		}
 	case *ast.TableConstructor:
 		for i, field := range expr.(*ast.TableConstructor).Keys {
-			ret = ret && can_expr_to_string(field)
+			switch field.(type) {
+			case *ast.ConstIdent:
+			case *ast.ConstString:
+			case *ast.ConstInt:
+			default:
+				return false
+			}
 			ret = ret && can_expr_to_string(expr.(*ast.TableConstructor).Vals[i])
 		}
 	case *ast.ConstString:

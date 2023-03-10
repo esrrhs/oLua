@@ -13,7 +13,8 @@ function test()
         a[b] = 5
         a.d = { e = 6 }
         a.d.f = 7
-        a.b.c = 8
+        a.d[1] = 8
+        a.b.c = 9
 
     end
 
