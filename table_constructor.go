@@ -6,7 +6,11 @@ import (
 	"strings"
 )
 
-func find_first_table_constructor(block []ast.Stmt) (bool, []ast.Stmt, ast.Stmt, int) {
+func find_last_table_constructor(block []ast.Stmt) (bool, []ast.Stmt, ast.Stmt, int) {
+	var r_ok bool
+	var r_block []ast.Stmt
+	var r_stmt ast.Stmt
+	var r_used_count int
 	for _, stmt := range block {
 		switch nn := stmt.(type) {
 		case *ast.Assign:
@@ -23,46 +27,46 @@ func find_first_table_constructor(block []ast.Stmt) (bool, []ast.Stmt, ast.Stmt,
 			if is_new {
 				used_count := get_used_table_constructor_assign(block, stmt)
 				if used_count > 0 {
-					return true, block, stmt, used_count
+					r_ok, r_block, r_stmt, r_used_count = true, block, stmt, used_count
 				}
 			}
 		case *ast.DoBlock:
-			ok, ret_block, ret_stmt, ret_used_count := find_first_table_constructor(nn.Block)
+			ok, ret_block, ret_stmt, ret_used_count := find_last_table_constructor(nn.Block)
 			if ok {
-				return true, ret_block, ret_stmt, ret_used_count
+				r_ok, r_block, r_stmt, r_used_count = true, ret_block, ret_stmt, ret_used_count
 			}
 		case *ast.If:
-			ok, ret_block, ret_stmt, ret_used_count := find_first_table_constructor(nn.Then)
+			ok, ret_block, ret_stmt, ret_used_count := find_last_table_constructor(nn.Then)
 			if ok {
-				return true, ret_block, ret_stmt, ret_used_count
+				r_ok, r_block, r_stmt, r_used_count = true, ret_block, ret_stmt, ret_used_count
 			}
-			ok, ret_block, ret_stmt, ret_used_count = find_first_table_constructor(nn.Else)
+			ok, ret_block, ret_stmt, ret_used_count = find_last_table_constructor(nn.Else)
 			if ok {
-				return true, ret_block, ret_stmt, ret_used_count
+				r_ok, r_block, r_stmt, r_used_count = true, ret_block, ret_stmt, ret_used_count
 			}
 		case *ast.WhileLoop:
-			ok, ret_block, ret_stmt, ret_used_count := find_first_table_constructor(nn.Block)
+			ok, ret_block, ret_stmt, ret_used_count := find_last_table_constructor(nn.Block)
 			if ok {
-				return true, ret_block, ret_stmt, ret_used_count
+				r_ok, r_block, r_stmt, r_used_count = true, ret_block, ret_stmt, ret_used_count
 			}
 		case *ast.RepeatUntilLoop:
-			ok, ret_block, ret_stmt, ret_used_count := find_first_table_constructor(nn.Block)
+			ok, ret_block, ret_stmt, ret_used_count := find_last_table_constructor(nn.Block)
 			if ok {
-				return true, ret_block, ret_stmt, ret_used_count
+				r_ok, r_block, r_stmt, r_used_count = true, ret_block, ret_stmt, ret_used_count
 			}
 		case *ast.ForLoopNumeric:
-			ok, ret_block, ret_stmt, ret_used_count := find_first_table_constructor(nn.Block)
+			ok, ret_block, ret_stmt, ret_used_count := find_last_table_constructor(nn.Block)
 			if ok {
-				return true, ret_block, ret_stmt, ret_used_count
+				r_ok, r_block, r_stmt, r_used_count = true, ret_block, ret_stmt, ret_used_count
 			}
 		case *ast.ForLoopGeneric:
-			ok, ret_block, ret_stmt, ret_used_count := find_first_table_constructor(nn.Block)
+			ok, ret_block, ret_stmt, ret_used_count := find_last_table_constructor(nn.Block)
 			if ok {
-				return true, ret_block, ret_stmt, ret_used_count
+				r_ok, r_block, r_stmt, r_used_count = true, ret_block, ret_stmt, ret_used_count
 			}
 		}
 	}
-	return false, nil, nil, 0
+	return r_ok, r_block, r_stmt, r_used_count
 }
 
 func get_used_table_constructor_assign(block []ast.Stmt, assign_stmt ast.Stmt) int {
@@ -108,7 +112,7 @@ func get_used_table_constructor_assign(block []ast.Stmt, assign_stmt ast.Stmt) i
 }
 
 func opt_func_table_constructor(func_decl *ast.FuncDecl) {
-	ok, ret_block, ret_stmt, ret_used_count := find_first_table_constructor(func_decl.Block)
+	ok, ret_block, ret_stmt, ret_used_count := find_last_table_constructor(func_decl.Block)
 	if !ok {
 		return
 	}

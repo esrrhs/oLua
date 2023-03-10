@@ -98,7 +98,82 @@ func check_expr_same(left ast.Expr, right ast.Expr) bool {
 				return true
 			}
 		}
+	case *ast.FuncCall:
+		left_call := left.(*ast.FuncCall)
+		switch right.(type) {
+		case *ast.FuncCall:
+			right_call := right.(*ast.FuncCall)
+			if check_expr_same(left_call.Function, right_call.Function) {
+				if len(left_call.Args) == len(right_call.Args) {
+					for i := 0; i < len(left_call.Args); i++ {
+						if !check_expr_same(left_call.Args[i], right_call.Args[i]) {
+							return false
+						}
+					}
+					return true
+				}
+			}
+		}
+	case *ast.TableConstructor:
+		left_constructor := left.(*ast.TableConstructor)
+		switch right.(type) {
+		case *ast.TableConstructor:
+			right_constructor := right.(*ast.TableConstructor)
+			if len(left_constructor.Keys) == len(right_constructor.Keys) {
+				for i := 0; i < len(left_constructor.Keys); i++ {
+					if !check_expr_same(left_constructor.Keys[i], right_constructor.Keys[i]) {
+						return false
+					}
+					if !check_expr_same(left_constructor.Vals[i], right_constructor.Vals[i]) {
+						return false
+					}
+				}
+				return true
+			}
+		}
+	case *ast.ConstString:
+		left_string := left.(*ast.ConstString)
+		switch right.(type) {
+		case *ast.ConstString:
+			right_string := right.(*ast.ConstString)
+			if left_string.Value == right_string.Value {
+				return true
+			}
+		}
+	case *ast.ConstInt:
+		left_int := left.(*ast.ConstInt)
+		switch right.(type) {
+		case *ast.ConstInt:
+			right_int := right.(*ast.ConstInt)
+			if left_int.Value == right_int.Value {
+				return true
+			}
+		}
+	case *ast.ConstFloat:
+		left_float := left.(*ast.ConstFloat)
+		switch right.(type) {
+		case *ast.ConstFloat:
+			right_float := right.(*ast.ConstFloat)
+			if left_float.Value == right_float.Value {
+				return true
+			}
+		}
+	case *ast.ConstBool:
+		left_bool := left.(*ast.ConstBool)
+		switch right.(type) {
+		case *ast.ConstBool:
+			right_bool := right.(*ast.ConstBool)
+			if left_bool.Value == right_bool.Value {
+				return true
+			}
+		}
+	case *ast.ConstNil:
+		switch right.(type) {
+		case *ast.ConstNil:
+			return true
+		}
 	}
+
 	return false
 }
 
