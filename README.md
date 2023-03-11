@@ -8,7 +8,6 @@
 ## 优化点
 - [x] 优化Lua的table访问
 - [x] 优化Lua的table构造
-- [ ] 优化Lua的字符串拼接
 
 ## 优化Lua的table访问
 例如如下代码：
