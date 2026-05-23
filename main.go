@@ -3,11 +3,12 @@ package main
 import (
 	"bufio"
 	"flag"
-	"github.com/milochristiansen/lua/ast"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/milochristiansen/lua/ast"
 )
 
 var input = flag.String("input", "input.lua", "Input file")
@@ -15,6 +16,9 @@ var inputpath = flag.String("inputpath", "", "Input path")
 var output = flag.String("output", "output.lua", "Output file")
 
 var opt_table_access = flag.Bool("opt_table_access", false, "Optimize table access")
+var opt_table_access_threshold = flag.Int("opt_table_access_threshold", 2, "Minimum read count to trigger table access optimization")
+var opt_table_access_pure_funcs = flag.String("opt_table_access_pure_funcs", "log_.*", "Comma-separated regex patterns for pure functions that don't modify arguments (in addition to built-in whitelist)")
+var opt_table_access_global = flag.Bool("opt_table_access_global", false, "Also optimize _G.xxx access (disabled by default for readability)")
 var opt_table_constructor = flag.Bool("opt_table_constructor", false, "Optimize table constructor")
 
 var has_opt bool
