@@ -15,9 +15,10 @@ function test_while_cond_invalidates()
     local a_b = a.b -- opt by oLua
     local x = a_b.c
     local y = a_b.d
-    while foo(a_b) do
+    while foo(a.b) do
         break
     end
+    a_b = a.b -- opt by oLua
     local z = a_b.e
     local w = a_b.f
 end
@@ -29,7 +30,8 @@ function test_repeat_cond_invalidates()
     local y = a_b.d
     repeat
         break
-    until foo(a_b)
+    until foo(a.b)
+    a_b = a.b -- opt by oLua
     local z = a_b.e
     local w = a_b.f
 end

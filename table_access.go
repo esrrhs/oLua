@@ -301,6 +301,8 @@ type ReadGroup struct {
 // 对于 target="a.b"：
 //   - a.b.c 读取了 a.b（通过 a.b 访问 c）
 //   - a.b 本身作为值也是读取
+// 注意：内层匿名函数 (function() ... end) 的 body 不算外层的读——
+//   函数定义本身只是个值，不立即执行，且 body 中的 local 作用域独立。
 func exprContainsPathRead(expr ast.Expr, target string) bool {
 	if expr == nil {
 		return false
@@ -342,6 +344,9 @@ func exprContainsPathRead(expr ast.Expr, target string) bool {
 		}
 	case *ast.Parens:
 		return exprContainsPathRead(e.Inner, target)
+	case *ast.FuncDecl:
+		// 匿名函数定义本身不读 target（body 在调用时才执行），不递归
+		return false
 	}
 	return false
 }
@@ -354,11 +359,21 @@ func exprContainsPathRead(expr ast.Expr, target string) bool {
 //   - 接收者/参数路径等于 target 或是 target 的子级时 → 不失效
 //     （如 func1(a.b) 不能修改 a 表上 b 字段的绑定 → a.b 缓存仍有效）
 //   - Function 表达式中的嵌套调用也需检查
+//   - IIFE 形式 (function() ... end)() 直接分析其 body 是否写 target
 func funcCallInvalidatesTarget(call *ast.FuncCall, target string) bool {
 	// 纯函数白名单检查：如果函数名在白名单中，不使 target 失效
 	funcName, nameOk := getFuncCallName(call)
 	if nameOk && isPureFunction(funcName) {
 		return false
+	}
+
+	// IIFE 检查：如果 Function 直接是 FuncDecl，立即执行，分析其 body
+	if fn := unwrapParens(call.Function); fn != nil {
+		if fdecl, isFD := fn.(*ast.FuncDecl); isFD {
+			if blockContainsWrite(fdecl.Block, target) {
+				return true
+			}
+		}
 	}
 
 	// 检查接收者（方法调用：a.b:method() → self=a.b，可以修改 a.b 的字段）
@@ -391,6 +406,17 @@ func funcCallInvalidatesTarget(call *ast.FuncCall, target string) bool {
 	return false
 }
 
+// unwrapParens 剥离表达式外层的 Parens 包装，返回真正的内层表达式。
+func unwrapParens(expr ast.Expr) ast.Expr {
+	for {
+		p, ok := expr.(*ast.Parens)
+		if !ok {
+			return expr
+		}
+		expr = p.Inner
+	}
+}
+
 // nestedCallInvalidates 检查表达式中是否存在使 target 失效的嵌套函数调用。
 func nestedCallInvalidates(expr ast.Expr, target string) bool {
 	if expr == nil {
@@ -416,11 +442,17 @@ func nestedCallInvalidates(expr ast.Expr, target string) bool {
 		}
 	case *ast.Parens:
 		return nestedCallInvalidates(e.Inner, target)
+	case *ast.FuncDecl:
+		// 匿名函数定义不立即执行，不递归 body
+		return false
 	}
 	return false
 }
 
 // exprContainsFuncCallInvalidating 检查表达式中是否有任何函数调用会使 target 失效。
+// 注意：内层匿名函数定义本身不会立即执行，所以 body 中的写不算这里的失效。
+// 但如果匿名函数被传入其他函数（如 callback）或立即调用（IIFE），
+// 由外层 funcCallInvalidatesTarget/IIFE 处理决定。
 func exprContainsFuncCallInvalidating(expr ast.Expr, target string) bool {
 	if expr == nil {
 		return false
@@ -457,6 +489,9 @@ func exprContainsFuncCallInvalidating(expr ast.Expr, target string) bool {
 		}
 	case *ast.Parens:
 		return exprContainsFuncCallInvalidating(e.Inner, target)
+	case *ast.FuncDecl:
+		// 匿名函数定义本身不立即调用，不算失效
+		return false
 	}
 	return false
 }
@@ -539,6 +574,9 @@ func stmtContainsWrite(stmt ast.Stmt, target string) bool {
 		if blockContainsWrite(s.Block, target) {
 			return true
 		}
+	case *ast.Goto, *ast.Label:
+		// 控制流跳转：保守处理为写
+		return true
 	}
 	return false
 }
@@ -705,6 +743,16 @@ func analyzeBlockAccess(block []ast.Stmt, target string) []AccessEvent {
 					stmtHasWrite = true
 				}
 			}
+
+		case *ast.Goto:
+			// goto 是控制流跳转：可能跳过中间的写操作，或从其他位置跳过来。
+			// 保守处理：作为 WRITE 打断读组（goto break 也算）
+			stmtHasWrite = true
+
+		case *ast.Label:
+			// label 是 goto 的目标：可能从其他位置跳过来导致未初始化的 local 被引用。
+			// 保守处理：作为 WRITE 打断读组
+			stmtHasWrite = true
 		}
 
 		// 生成事件——同一语句中写在读之后
@@ -824,6 +872,9 @@ func countDistinctReads(stmt ast.Stmt, target string) int {
 			}
 		case *ast.Parens:
 			walkExpr(e.Inner)
+		case *ast.FuncDecl:
+			// 匿名函数体不算外层语句的读
+			return
 		}
 	}
 
@@ -971,6 +1022,9 @@ func collectTableAccessCandidates(block []ast.Stmt, threshold int) map[string]in
 			}
 		case *ast.Parens:
 			walkExpr(e.Inner, leafPaths)
+		case *ast.FuncDecl:
+			// 匿名函数体内的访问不算外层 block 的候选
+			return
 		}
 	}
 

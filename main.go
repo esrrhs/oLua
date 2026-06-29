@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -32,12 +33,22 @@ func main() {
 	if *inputpath != "" {
 		opt_path(*inputpath)
 	} else {
-		opt(*input, *output)
+		if err := opt(*input, *output); err != nil {
+			log.Fatal(err)
+		}
 	}
 }
 
+// opt_path 批量处理目录下所有 .lua 文件。
+// 单个文件失败时记录错误并继续处理其他文件，不终止整个流程。
 func opt_path(inputpath string) {
+	failed := 0
+	processed := 0
 	filepath.Walk(inputpath, func(path string, f os.FileInfo, err error) error {
+		if err != nil {
+			log.Printf("walk error on %s: %v", path, err)
+			return nil
+		}
 		if f.IsDir() {
 			return nil
 		}
@@ -45,51 +56,74 @@ func opt_path(inputpath string) {
 			return nil
 		}
 		log.Println("start opt_path:", path)
-		opt(path, "./tmp.lua")
+		if err := opt(path, "./tmp.lua"); err != nil {
+			log.Printf("skip %s due to error: %v", path, err)
+			os.Remove("./tmp.lua")
+			failed++
+			return nil
+		}
 		if goptcount > 0 {
 			os.Remove(path)
 			os.Rename("./tmp.lua", path)
 		} else {
 			os.Remove("./tmp.lua")
 		}
+		processed++
 		return nil
 	})
+	log.Printf("opt_path done: %d processed, %d failed", processed, failed)
 }
 
-func opt(input string, output string) {
+// opt 对单个文件执行迭代优化。返回 error 而不是直接 fatal，让批量模式可以跳过失败文件。
+func opt(input string, output string) error {
 	gfilename = input
 	goptcount = 0
-	read_file(input)
-	write_file(output)
+	if err := read_file(input); err != nil {
+		return fmt.Errorf("read_file failed: %w", err)
+	}
+	if err := write_file(output); err != nil {
+		return fmt.Errorf("write_file failed: %w", err)
+	}
 	has_opt = true
 	for has_opt {
 		has_opt = false
-		read_file(output)
-		parse_lua()
+		if err := read_file(output); err != nil {
+			return fmt.Errorf("read_file failed: %w", err)
+		}
+		if err := parse_lua(); err != nil {
+			return fmt.Errorf("parse_lua failed: %w", err)
+		}
 		opt_lua()
-		write_file(output)
+		if err := write_file(output); err != nil {
+			return fmt.Errorf("write_file failed: %w", err)
+		}
 	}
+	return nil
 }
 
 var gfilecontent []string
 
-func read_file(filename string) {
+func read_file(filename string) error {
 	var filecontent []string
 	file, err := os.Open(filename)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		filecontent = append(filecontent, scanner.Text())
 	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
 	gfilecontent = filecontent
+	return nil
 }
 
 var gblock []ast.Stmt
 
-func parse_lua() {
+func parse_lua() error {
 	source := ""
 	for _, line := range gfilecontent {
 		source += line + "\n"
@@ -97,9 +131,10 @@ func parse_lua() {
 
 	block, err := ast.Parse(source, 1)
 	if err != nil {
-		log.Fatalf("%v %v", gfilename, err)
+		return fmt.Errorf("%v: %v", gfilename, err)
 	}
 	gblock = block
+	return nil
 }
 
 func opt_lua() {
@@ -136,13 +171,16 @@ func opt_func(func_decl *ast.FuncDecl) {
 	}
 }
 
-func write_file(filename string) {
+func write_file(filename string) error {
 	file, err := os.Create(filename)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer file.Close()
 	for _, line := range gfilecontent {
-		file.WriteString(line + "\n")
+		if _, err := file.WriteString(line + "\n"); err != nil {
+			return err
+		}
 	}
+	return nil
 }

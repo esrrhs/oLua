@@ -6,32 +6,104 @@
 一个聊胜于无的Lua优化工具。
 
 ## 优化点
-- [x] 优化Lua的table访问
+- [x] 优化Lua的table访问（基于读写分析，安全可靠）
 - [x] 优化Lua的table构造
 
-## 优化Lua的table访问
-例如如下代码：
-```lua
-a.b = {}
-if a.c then
-    a.b.data1 = "1"
-    a.b.data2 = "2"
-    a.b.data3 = "3"
-end
-```
-a.b是一个table，每次访问a.b都会触发一次table的访问，这样会影响性能，所以可以优化为：
-```lua
-a.b = {}
-local a_b = a.b
-if a.c then
-    a_b.data1 = "1"
-    a_b.data2 = "2"
-    a_b.data3 = "3"
-end
-```
-**注意：这里做了一个假设推断，当对一个a.b赋值构造的table后，就不会再更改a.b为其他table或者其他类型。只针对符合这种假设的推断的代码才能优化。**
+## 优化 Lua 的 table 访问
 
-## 优化Lua的table构造
+### 基本原理
+
+Lua 中每次 `a.b` 都会触发一次 table 查找。如果在一个作用域内多次访问同一个表路径，可以缓存到 local 变量减少查找次数。
+
+例如：
+```lua
+local x = a.b.c
+local y = a.b.d
+local z = a.b.e
+```
+优化为：
+```lua
+local a_b = a.b -- opt by oLua
+local x = a_b.c
+local y = a_b.d
+local z = a_b.e
+```
+
+### 读写分析
+
+不同于简单的模式匹配，oLua 使用**读写分析**（Read/Write Analysis）来判断什么时候缓存仍然有效：
+
+- **写操作会使缓存失效**：`a.b = {}`、`a = ...`（父级写）、`func1(a)`（函数可能修改 a 的字段）等
+- **写操作之后的读，需要刷新缓存**
+
+例如：
+```lua
+local x = a.b.c
+local y = a.b.d
+func1(a)         -- 函数可能修改 a，使 a.b 缓存失效
+local z = a.b.e
+local w = a.b.f
+```
+优化为：
+```lua
+local a_b = a.b -- opt by oLua
+local x = a_b.c
+local y = a_b.d
+func1(a)
+a_b = a.b -- opt by oLua（自动刷新）
+local z = a_b.e
+local w = a_b.f
+```
+
+### 失效规则细节
+
+- `func1(a.b)` 传入的是 `a.b` 的**值引用**，不能修改 `a` 表上 `b` 字段的绑定，所以 **a.b 缓存仍有效**
+- `func1(a.b)` 中函数可以修改 `a.b` 内部的字段（如 `arg.x = 1`），所以 **a.b.x 等子级缓存会失效**
+- `func1(a)` 传入 `a` 整个表的引用，可以做 `a.b = xxx`，所以 **a.b 缓存失效**
+- `a.b:method()` 中 `self = a.b`，可以修改 `a.b` 内部字段，所以 **a.b 仍有效，子级失效**
+- `a:method()` 中 `self = a`，可以修改 `a.b`，所以 **a.b 失效**
+
+### 纯函数白名单
+
+某些函数确实不修改参数（如 `print`、`tostring`、`pairs`、`math.floor`），oLua 内置了常用纯函数白名单。匹配的调用不会使缓存失效。
+
+用户也可以通过 `-opt_table_access_pure_funcs` 添加自定义纯函数（**正则表达式**，逗号分隔）：
+
+```bash
+./oLua -input file.lua -output out.lua -opt_table_access \
+       -opt_table_access_pure_funcs "log_.*,debug_.*,trace_.*"
+```
+
+默认值 `log_.*` 匹配 `log_info`, `log_error`, `log_debug` 等日志函数。
+
+### 命令行参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `-opt_table_access` | `false` | 启用 table 访问优化 |
+| `-opt_table_access_threshold` | `2` | 触发优化的最少读取次数（最小为 2） |
+| `-opt_table_access_pure_funcs` | `log_.*` | 纯函数正则表达式列表（逗号分隔） |
+| `-opt_table_access_global` | `false` | 是否优化 `_G.xxx` 形式（默认关闭，开启后影响可读性） |
+
+### 安全保证
+
+oLua 的 table 访问优化基于严格的读写分析，对以下场景**安全**：
+- 各种 if/else/while/for/repeat/do-end 复合语句的混合
+- 跨语句的连续读取
+- 函数调用使父级表失效后的自动刷新
+- 方法调用 `:method()` 的 self 失效语义
+- 多行 table 构造器中的多次访问
+- 嵌套循环和嵌套条件
+
+并通过以下机制避免破坏代码：
+- 变量名冲突自动检测（生成 `a_b_1` 等替代名）
+- 跳过已优化的代码行（避免重复优化）
+- 父子路径冲突检测（同一轮不同时优化父和子）
+- 复合语句中"条件先于 body 执行"的语义建模
+- 保守处理 `goto`/`label`（控制流跳转打断分析）
+
+## 优化 Lua 的 table 构造
+
 例如如下代码：
 ```lua
 local a = { a = 1, 2 }
@@ -41,37 +113,71 @@ a[3] = 3
 a.d = { e = 4 }
 a.d.f = 5
 ```
-每次往a中添加元素可能会触发table的扩容，所以可以优化为：
+每次往 `a` 中添加元素可能会触发 table 的扩容，所以可以优化为：
 ```lua
 local a = {['a']=1, 2, ['b']=1, ['c']=2, [3]=3, ['d']={['e']=4,['f']=5}}
 ```
 
 ## 使用
+
 编译：
 ```bash
 go mod tidy
 go build
 ```
-运行，优化单个文件的table访问：
+
+优化单个文件的 table 访问：
 ```bash
-./oLua -input input/table_access.lua -output output/table_access.lua -opt_table_access
+./oLua -input input.lua -output output.lua -opt_table_access
 ```
-运行，优化单个文件的table构造：
+
+优化单个文件的 table 构造：
 ```bash
-./oLua -input input/table_construct.lua -output output/table_construct.lua -opt_table_construct
+./oLua -input input.lua -output output.lua -opt_table_constructor
 ```
-也可以优化目录下的所有文件，原地替换：
+
+也可以同时启用多种优化、批量处理目录（原地替换）：
 ```bash
-./oLua -inputpath input_dir -opt_table_access -opt_table_construct
+./oLua -inputpath input_dir -opt_table_access -opt_table_constructor
 ```
+
+批量模式下，单个文件解析失败不会终止整个流程，会跳过该文件继续处理其他文件。
 
 ## 效果
-使用Lua执行input、output目录下的lua文件，看运行所需的时间。
 
-|   | 优化前   | 优化后  |  
+实测对比（PUC Lua 5.4.8，每个场景跑 3 次取最快）：
+
+| 场景 | 描述 | 优化前 | 优化后 | 提速 |
+|------|------|--------|--------|------|
+| 浅层多读 | 500 万次游戏 update（`self.physics.velocity.x` 等典型字段访问） | 0.78 s | 0.40 s | **~1.95×** |
+| 深层链 | 100 万次 8 层链 `a.b.c.d.e.f.g.h`，每次 4 读 | 0.088 s | 0.026 s | **~3.4×** |
+| 业务热点 | 5000 轮 × 1000 条数据，分支命中后才优化 | 0.32 s | 0.30 s | ~1.07× |
+
+业务代码典型场景（重复访问 `self.xxx.yyy.zzz`）大约 **1.5×~2× 提速**；极端深层访问可达 **3×+**；冷路径或访问次数少的代码不会被改动也不会有副作用。
+
+table 构造优化：
+
+|   | 优化前   | 优化后  |
 |---|-------|------|
-| table访问 | 19.07 | 11.0 |  
-| table构造 | 3.3   | 1.9  |  
+| table 构造 | 3.3 s | 1.9 s |
+
+## 测试
+
+运行单元测试：
+```bash
+go test ./...
+```
+
+查看代码覆盖率：
+```bash
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+```
+
+运行性能基准测试：
+```bash
+go test -bench=. -benchtime=1s -run="^$" ./...
+```
 
 ## 其他
 [lua全家桶](https://github.com/esrrhs/lua-family-bucket)

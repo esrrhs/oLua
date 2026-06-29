@@ -114,8 +114,9 @@ function test_stmt_write_while_cond()
     local x = a_b.c
     local y = a_b.d
     if true then
-        while foo(a_b) do break end
+        while foo(a.b) do break end
     end
+    a_b = a.b -- opt by oLua
     local z = a_b.e
     local w = a_b.f
 end
@@ -136,8 +137,9 @@ function test_stmt_write_for_numeric_init()
     local x = a_b.c
     local y = a_b.d
     if true then
-        for i = foo(a_b), 10 do break end
+        for i = foo(a.b), 10 do break end
     end
+    a_b = a.b -- opt by oLua
     local z = a_b.e
     local w = a_b.f
 end
@@ -147,8 +149,9 @@ function test_stmt_write_for_generic_init()
     local x = a_b.c
     local y = a_b.d
     if true then
-        for k, v in foo(a_b) do break end
+        for k, v in foo(a.b) do break end
     end
+    a_b = a.b -- opt by oLua
     local z = a_b.e
     local w = a_b.f
 end
@@ -337,6 +340,7 @@ function test_analyze_for_numeric_func_in_init()
     for i = 1, foo(a_b) do
         break
     end
+    a_b = a.b -- opt by oLua
     local z = a_b.e
     local w = a_b.f
 end

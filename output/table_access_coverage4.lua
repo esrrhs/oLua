@@ -58,6 +58,7 @@ function test_for_cond_func_invalidates()
     for i = 1, foo(a_b), 1 do
         break
     end
+    a_b = a.b -- opt by oLua
     local z = a_b.e
     local w = a_b.f
 end

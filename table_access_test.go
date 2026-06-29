@@ -68,6 +68,22 @@ func TestTableAccessPureFunc(t *testing.T) {
 	compareOptOutput(t, "input/table_access_purefunc.lua", "output/table_access_purefunc.lua")
 }
 
+func TestTableAccessCondRead(t *testing.T) {
+	compareOptOutput(t, "input/table_access_condread.lua", "output/table_access_condread.lua")
+}
+
+func TestTableAccessInvalidate(t *testing.T) {
+	compareOptOutput(t, "input/table_access_invalidate.lua", "output/table_access_invalidate.lua")
+}
+
+func TestTableAccessGoto(t *testing.T) {
+	compareOptOutput(t, "input/table_access_goto.lua", "output/table_access_goto.lua")
+}
+
+func TestTableAccessAnonFunc(t *testing.T) {
+	compareOptOutput(t, "input/table_access_anonfunc.lua", "output/table_access_anonfunc.lua")
+}
+
 // ============================================================================
 // 单元测试：辅助函数
 // ============================================================================
