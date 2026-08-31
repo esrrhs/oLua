@@ -264,7 +264,7 @@ func expr_to_string(expr ast.Expr) string {
 		case ast.OpPow:
 			expr_str = expr_to_string(expr.(*ast.Operator).Left) + "^" + expr_to_string(expr.(*ast.Operator).Right)
 		case ast.OpDiv:
-			expr_str = expr_to_string(expr.(*ast.Operator).Left) + ".." + expr_to_string(expr.(*ast.Operator).Right)
+			expr_str = expr_to_string(expr.(*ast.Operator).Left) + "/" + expr_to_string(expr.(*ast.Operator).Right)
 		case ast.OpBinAND:
 			expr_str = expr_to_string(expr.(*ast.Operator).Left) + "&" + expr_to_string(expr.(*ast.Operator).Right)
 		case ast.OpBinOR:
