@@ -3,11 +3,13 @@
 [<img src="https://img.shields.io/github/languages/top/esrrhs/oLua">](https://github.com/esrrhs/oLua)
 [<img src="https://img.shields.io/github/actions/workflow/status/esrrhs/oLua/go.yml?branch=master">](https://github.com/esrrhs/oLua/actions)
 
-一个聊胜于无的Lua优化工具。
+[中文](./README.md) | [English](./README_EN.md)
+
+一个聊胜于无的 Lua 优化工具：基于读写分析，安全地加速 table 访问与 table 构造。
 
 ## 优化点
-- [x] 优化Lua的table访问（基于读写分析，安全可靠）
-- [x] 优化Lua的table构造
+- [x] 优化 Lua 的 table 访问（基于读写分析，安全可靠）
+- [x] 优化 Lua 的 table 构造
 
 ## TODO
 - [ ] **局部化全局 / 库函数**：热函数入口生成 `local print, format = print, string.format` 等，减少 `_ENV` 查表
