@@ -5,16 +5,15 @@
 
 [English](./README.md) | [中文](./README_CN.md)
 
-一个聊胜于无的 Lua 优化工具：基于读写分析，安全地加速 table 访问与 table 构造。
+一个聊胜于无的 Lua 优化工具：基于读写分析，安全地加速 table 访问、table 构造、热路径上的全局/库函数查找、循环不变量表路径外提，以及常量折叠 / 死代码消除。
 
 ## 优化点
 - [x] 优化 Lua 的 table 访问（基于读写分析，安全可靠）
 - [x] 优化 Lua 的 table 构造
+- [x] 局部化全局 / 库函数（`-opt_localize_globals`）
+- [x] 循环不变量外提 / LICM（`-opt_licm`）
+- [x] 常量折叠 / 死代码消除（`-opt_const_fold`）
 
-## TODO
-- [ ] **局部化全局 / 库函数**：热函数入口生成 `local print, format = print, string.format` 等，减少 `_ENV` 查表
-- [ ] **循环不变量外提（LICM）**：循环体内不依赖迭代变量、且路径整段无写的表达式提到循环外
-- [ ] **常量折叠 / 死代码消除**：`2+3*4` → `14`；`if false then ... end` 消去；`if true then A else B end` → `A`
 
 ## 优化 Lua 的 table 访问
 
@@ -157,6 +156,135 @@ local a = {['a']=1, 2, ['b']=1, ['c']=2, [3]=3, ['d']={['e']=4, ['f']=5}}
 |------|--------|------|
 | `-opt_table_constructor` | `false` | 启用 table 构造优化 |
 
+
+## 局部化全局 / 库函数
+
+### 基本原理
+
+热函数里反复调用同一全局或库函数（`print`、`string.format`、`math.floor` 等）时，每次都会经 `_ENV` 查表。在函数入口提升为 local 可去掉这些查找。
+
+例如：
+```lua
+function hot()
+    print(1)
+    print(2)
+    print(string.format("%d", 3))
+    print(string.format("%d", 4))
+end
+```
+优化为：
+```lua
+function hot()
+    local print, format = print, string.format -- opt by oLua
+    print(1)
+    print(2)
+    print(format("%d", 3))
+    print(format("%d", 4))
+end
+```
+
+### 规则（v1）
+
+- 仅处理固定白名单（常用裸全局、`math.*`、`string.*`、`table.concat`、`os.clock` / `os.time` / `os.date`）
+- 同一函数内读取次数达到 `-opt_localize_globals_threshold` 才提升
+- 若该名（或库根）已是 local、函数内对全局/父路径有赋值、或重绑定 `_ENV` / `_G`，则跳过
+- 方法调用 `o:format()` / 字段 `o.format` 不视为 `string.format`
+- 嵌套函数体单独分析；已有 `-- opt by oLua` 行不改写
+
+### 命令行参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `-opt_localize_globals` | `false` | 启用全局 / 库函数局部化 |
+| `-opt_localize_globals_threshold` | `2` | 触发局部化的最少读取次数 |
+
+
+## 循环不变量外提（LICM）
+
+### 基本原理
+
+当循环内多次读取同一个静态表路径，且循环内没有任何写/失效时，oLua 在循环头之前插入 local，并改写循环体（以及 while/repeat 条件）中的读取。
+
+例如：
+```lua
+function hot(a)
+    for i = 1, 100 do
+        local x = a.b.c + i
+        local y = a.b.d + i
+        local z = a.b.e + i
+    end
+end
+```
+优化为：
+```lua
+function hot(a)
+    local a_b = a.b -- opt by oLua
+    for i = 1, 100 do
+        local x = a_b.c + i
+        local y = a_b.d + i
+        local z = a_b.e + i
+    end
+end
+```
+
+### 规则（v1）
+
+- 仅处理 `getExprPath` 得到的静态点分路径（动态 key 不支持）
+- 循环体（含 while/repeat 条件）读取次数达到 `-opt_licm_threshold`（下限 2）
+- 循环内出现 `goto` / `label` / `break` 则整段跳过
+- 路径含 for 迭代变量则跳过
+- 循环内对该路径有写/失效，或存在非纯函数调用，则跳过
+- 嵌套函数体单独分析；每轮只外提一次
+
+### 命令行参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `-opt_licm` | `false` | 启用循环不变量外提 |
+| `-opt_licm_threshold` | `2` | 触发外提的最少读取次数（最小为 2） |
+
+
+
+## 常量折叠 / 死代码消除
+
+### 基本原理
+
+对纯常量算术、关系、布尔表达式做折叠；对 `if true` / `if false` 做死代码消除（注意 Lua 真值：只处理布尔 `true`/`false`，不会对 `if 0` 做 DCE）。
+
+例如：
+```lua
+function f()
+    local x = 2 + 3 * 4
+    if false then
+        print("dead")
+    else
+        print("alive")
+    end
+end
+```
+优化为：
+```lua
+function f()
+    local x = 14 -- opt by oLua
+        print("alive") -- opt by oLua
+end
+```
+
+### 规则（v1）
+
+- 折叠纯常量算术（`+ - * / // % ^` 与一元 `-`）、关系（`== ~= < > <= >=`）、布尔（`and or not`）
+- 跳过除零/取模零；不折叠位运算、连接、长度运算
+- DCE 仅针对 `if true` / `if false`（不对 `if 0` 等真值常量）
+- 若 if 的 then/else 含 `goto` / `break` / `label` 则跳过 DCE
+- 每轮只做一次折叠或一次 DCE；嵌套函数单独分析
+
+### 命令行参数
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `-opt_const_fold` | `false` | 启用常量折叠与 if true/false DCE |
+
+
 ## 使用
 
 编译：
@@ -175,9 +303,24 @@ go build
 ./oLua -input input.lua -output output.lua -opt_table_constructor
 ```
 
+局部化全局 / 库函数：
+```bash
+./oLua -input input.lua -output output.lua -opt_localize_globals
+```
+
+循环不变量外提：
+```bash
+./oLua -input input.lua -output output.lua -opt_licm
+```
+
+常量折叠 / DCE：
+```bash
+./oLua -input input.lua -output output.lua -opt_const_fold
+```
+
 也可以同时启用多种优化、批量处理目录（原地替换）：
 ```bash
-./oLua -inputpath input_dir -opt_table_access -opt_table_constructor
+./oLua -inputpath input_dir -opt_table_access -opt_table_constructor -opt_localize_globals -opt_licm -opt_const_fold
 ```
 
 批量模式下，单个文件解析失败不会终止整个流程，会跳过该文件继续处理其他文件。

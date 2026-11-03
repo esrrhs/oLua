@@ -5,16 +5,15 @@
 
 [English](./README.md) | [中文](./README_CN.md)
 
-A practical Lua optimizer that safely speeds up table access and table constructors using read/write analysis.
+A practical Lua optimizer that safely speeds up table access, table constructors, hot global/library lookups, loop-invariant table paths, and constant folding / dead-code elimination.
 
 ## Optimizations
 - [x] Optimize Lua table access (read/write analysis, safe and reliable)
 - [x] Optimize Lua table constructors
+- [x] Localize globals / library functions (`-opt_localize_globals`)
+- [x] Loop-invariant code motion / LICM (`-opt_licm`)
+- [x] Constant folding / dead code elimination (`-opt_const_fold`)
 
-## TODO
-- [ ] **Localize globals / library functions**: hoist `local print, format = print, string.format` at hot function entries to reduce `_ENV` lookups
-- [ ] **Loop-invariant code motion (LICM)**: hoist expressions that do not depend on the loop iterator and have no writes along the path
-- [ ] **Constant folding / dead code elimination**: `2+3*4` → `14`; drop `if false then ... end`; rewrite `if true then A else B end` → `A`
 
 ## Optimize Lua table access
 
@@ -157,6 +156,135 @@ Stop absorbing as soon as any of these appear:
 |------|---------|-------------|
 | `-opt_table_constructor` | `false` | Enable table constructor optimization |
 
+
+## Localize globals / library functions
+
+### Basics
+
+Hot functions often call the same globals or library functions many times (`print`, `string.format`, `math.floor`, …). Each call looks up the name through `_ENV`. Hoisting them into locals at function entry removes those lookups.
+
+For example:
+```lua
+function hot()
+    print(1)
+    print(2)
+    print(string.format("%d", 3))
+    print(string.format("%d", 4))
+end
+```
+becomes:
+```lua
+function hot()
+    local print, format = print, string.format -- opt by oLua
+    print(1)
+    print(2)
+    print(format("%d", 3))
+    print(format("%d", 4))
+end
+```
+
+### Rules (v1)
+
+- Only a fixed whitelist is localized (common bare globals, `math.*`, `string.*`, `table.concat`, `os.clock` / `os.time` / `os.date`)
+- A name is localized only when it is read at least `-opt_localize_globals_threshold` times in that function
+- Skip when the name (or library root) is already local, when the function assigns that global/parent, or when the function rebinds `_ENV` / `_G`
+- Method calls such as `o:format()` / field reads `o.format` are not treated as `string.format`
+- Nested function bodies are analyzed separately; existing `-- opt by oLua` lines are left untouched
+
+### CLI flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-opt_localize_globals` | `false` | Enable localize globals / library functions |
+| `-opt_localize_globals_threshold` | `2` | Minimum read count to trigger localization |
+
+
+## Loop-invariant code motion (LICM)
+
+### Basics
+
+When a static table path is read many times inside a loop and nothing in that loop can write or invalidate it, oLua hoists one local before the loop header and rewrites the body (and while/repeat condition) reads.
+
+For example:
+```lua
+function hot(a)
+    for i = 1, 100 do
+        local x = a.b.c + i
+        local y = a.b.d + i
+        local z = a.b.e + i
+    end
+end
+```
+becomes:
+```lua
+function hot(a)
+    local a_b = a.b -- opt by oLua
+    for i = 1, 100 do
+        local x = a_b.c + i
+        local y = a_b.d + i
+        local z = a_b.e + i
+    end
+end
+```
+
+### Rules (v1)
+
+- Only static dotted paths from `getExprPath` (no dynamic keys)
+- Body (plus while/repeat condition) reads must reach `-opt_licm_threshold` (clamped to ≥ 2)
+- Skip the loop when it contains `goto` / `label` / `break`
+- Skip paths that include a for-loop iterator binder
+- Skip when the loop writes or invalidates the path, or contains any non-pure call
+- Nested function bodies are analyzed separately; one hoist per optimization round
+
+### CLI flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-opt_licm` | `false` | Enable loop-invariant code motion |
+| `-opt_licm_threshold` | `2` | Minimum body read count to hoist (at least 2) |
+
+
+
+## Constant folding / dead code elimination
+
+### Basics
+
+Pure constant arithmetic, relational, and boolean expressions are folded to literals. `if true` / `if false` branches are eliminated (Lua-truthiness caveat: only boolean `true`/`false`, not `if 0`).
+
+For example:
+```lua
+function f()
+    local x = 2 + 3 * 4
+    if false then
+        print("dead")
+    else
+        print("alive")
+    end
+end
+```
+becomes:
+```lua
+function f()
+    local x = 14 -- opt by oLua
+        print("alive") -- opt by oLua
+end
+```
+
+### Rules (v1)
+
+- Fold pure const arith (`+ - * / // % ^` unary `-`), relational (`== ~= < > <= >=`), and bool (`and or not`)
+- Skip division/modulo by zero; skip bitwise, concat, and length
+- DCE only for `if true` / `if false` (not `if 0` / other truthy consts)
+- Skip DCE when the if then/else contains `goto` / `break` / `label`
+- One fold or one DCE per optimization round; nested functions analyzed separately
+
+### CLI flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-opt_const_fold` | `false` | Enable constant folding and if true/false DCE |
+
+
 ## Usage
 
 Build:
@@ -175,9 +303,24 @@ Optimize table constructors for one file:
 ./oLua -input input.lua -output output.lua -opt_table_constructor
 ```
 
-Enable both and batch-process a directory (in-place):
+Localize globals / library functions:
 ```bash
-./oLua -inputpath input_dir -opt_table_access -opt_table_constructor
+./oLua -input input.lua -output output.lua -opt_localize_globals
+```
+
+Loop-invariant code motion:
+```bash
+./oLua -input input.lua -output output.lua -opt_licm
+```
+
+Constant folding / DCE:
+```bash
+./oLua -input input.lua -output output.lua -opt_const_fold
+```
+
+Enable all and batch-process a directory (in-place):
+```bash
+./oLua -inputpath input_dir -opt_table_access -opt_table_constructor -opt_localize_globals -opt_licm -opt_const_fold
 ```
 
 In batch mode, a parse failure on one file does not abort the run; that file is skipped and others continue.

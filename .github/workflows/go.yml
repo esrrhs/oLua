@@ -1,6 +1,4 @@
-# This workflow will build a golang project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
-
+# Build, vet, tidy-check, and race-test the Go project.
 name: Go
 
 on:
@@ -9,22 +7,30 @@ on:
   pull_request:
     branches: [ "master" ]
 
-jobs:
+permissions:
+  contents: read
 
+jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v3
+      uses: actions/setup-go@v5
       with:
-        go-version: 1.19
+        go-version-file: go.mod
 
-    - name: Build
+    - name: Tidy check
       run: |
         go mod tidy
-        go build -v ./...
+        git diff --exit-code go.mod go.sum
+
+    - name: Vet
+      run: go vet ./...
+
+    - name: Build
+      run: go build -v ./...
 
     - name: Test
-      run: go test -v ./...
+      run: go test -race -count=1 -v ./...

@@ -13,3 +13,9 @@
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+
+# Local build artifact
+/oLua
+
+# Optimizer same-dir temp files from opt_path
+*.olua.tmp

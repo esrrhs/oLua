@@ -21,6 +21,11 @@ var opt_table_access_threshold = flag.Int("opt_table_access_threshold", 2, "Mini
 var opt_table_access_pure_funcs = flag.String("opt_table_access_pure_funcs", "log_.*", "Comma-separated regex patterns for pure functions that don't modify arguments (in addition to built-in whitelist)")
 var opt_table_access_global = flag.Bool("opt_table_access_global", false, "Also optimize _G.xxx access (disabled by default for readability)")
 var opt_table_constructor = flag.Bool("opt_table_constructor", false, "Optimize table constructor")
+var opt_const_fold = flag.Bool("opt_const_fold", false, "Constant folding and if true/false dead code elimination")
+var opt_localize_globals = flag.Bool("opt_localize_globals", false, "Localize frequently used globals/library functions")
+var opt_localize_globals_threshold = flag.Int("opt_localize_globals_threshold", 2, "Minimum read count to trigger localize globals optimization")
+var opt_licm = flag.Bool("opt_licm", false, "Loop-invariant code motion (hoist invariant table paths out of loops)")
+var opt_licm_threshold = flag.Int("opt_licm_threshold", 2, "Minimum body read count to trigger LICM (clamped to >= 2)")
 
 var has_opt bool
 var gfilename string
@@ -41,6 +46,7 @@ func main() {
 
 // opt_path 批量处理目录下所有 .lua 文件。
 // 单个文件失败时记录错误并继续处理其他文件，不终止整个流程。
+// 临时文件写在同目录（os.CreateTemp + *.olua.tmp），成功时直接 Rename 覆盖，不先 Remove 目标。
 func opt_path(inputpath string) {
 	failed := 0
 	processed := 0
@@ -52,21 +58,44 @@ func opt_path(inputpath string) {
 		if f.IsDir() {
 			return nil
 		}
+		// Skip optimizer temp files (and anything that is not a real .lua source).
+		base := filepath.Base(path)
+		if strings.HasSuffix(base, ".olua.tmp") || strings.Contains(base, ".olua.tmp") {
+			return nil
+		}
 		if !strings.HasSuffix(path, ".lua") {
 			return nil
 		}
 		log.Println("start opt_path:", path)
-		if err := opt(path, "./tmp.lua"); err != nil {
+		tmp, err := os.CreateTemp(filepath.Dir(path), "oLua-*.olua.tmp")
+		if err != nil {
+			log.Printf("skip %s due to temp create error: %v", path, err)
+			failed++
+			return nil
+		}
+		tmpName := tmp.Name()
+		if err := tmp.Close(); err != nil {
+			os.Remove(tmpName)
+			log.Printf("skip %s due to temp close error: %v", path, err)
+			failed++
+			return nil
+		}
+		if err := opt(path, tmpName); err != nil {
 			log.Printf("skip %s due to error: %v", path, err)
-			os.Remove("./tmp.lua")
+			os.Remove(tmpName)
 			failed++
 			return nil
 		}
 		if goptcount > 0 {
-			os.Remove(path)
-			os.Rename("./tmp.lua", path)
+			// Same-dir rename replaces the target atomically on Unix; do not Remove first.
+			if err := os.Rename(tmpName, path); err != nil {
+				log.Printf("skip %s due to rename error: %v", path, err)
+				os.Remove(tmpName)
+				failed++
+				return nil
+			}
 		} else {
-			os.Remove("./tmp.lua")
+			os.Remove(tmpName)
 		}
 		processed++
 		return nil
@@ -157,8 +186,26 @@ func opt_lua() {
 }
 
 func opt_func(func_decl *ast.FuncDecl) {
+	if *opt_const_fold {
+		opt_func_const_fold(func_decl)
+		if has_opt {
+			return
+		}
+	}
 	if *opt_table_constructor {
 		opt_func_table_constructor(func_decl)
+		if has_opt {
+			return
+		}
+	}
+	if *opt_localize_globals {
+		opt_func_localize_globals(func_decl)
+		if has_opt {
+			return
+		}
+	}
+	if *opt_licm {
+		opt_func_licm(func_decl)
 		if has_opt {
 			return
 		}
