@@ -1,10 +1,9 @@
 function math_hot()
-    local abs, floor, max, concat, clock = math.abs, math.floor, math.max, table.concat, os.clock -- opt by oLua
-    local a = abs(-1) + floor(1.5) + max(1, 2)
-    local b = abs(-2) + floor(2.5) + max(3, 4)
-    local c = concat({"a", "b"}, ",")
-    local d = concat({"c", "d"}, ",")
-    return a, b, c, d, clock(), clock()
+    local a = math.abs(-1) + math.floor(1.5) + math.max(1, 2)
+    local b = math.abs(-2) + math.floor(2.5) + math.max(3, 4)
+    local c = table.concat({"a", "b"}, ",")
+    local d = table.concat({"c", "d"}, ",")
+    return a, b, c, d, os.clock(), os.clock()
 end
 
 math_hot()

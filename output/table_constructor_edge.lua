@@ -31,7 +31,9 @@ end
 
 -- 5) Non-local target: s.o = {} should still merge.
 function test_non_local_target()
-    s.o = {['k']=1, ['m']=2} -- opt by oLua
+    s.o = {}
+    s.o.k = 1
+    s.o.m = 2
 end
 
 -- 6) Inside an if branch.
@@ -43,8 +45,12 @@ end
 
 -- 7) Multiple independent tables: both should merge across rounds.
 function test_multiple_tables()
-    local a = {['x']=1, ['z']=2} -- opt by oLua
-    local b = {['y']=1, ['w']=2} -- opt by oLua
+    local a = {}
+    local b = {}
+    a.x = 1
+    b.y = 1
+    a.z = 2
+    b.w = 2
 end
 
 -- 8) Sub-table clobbered by leaf value (same-key overwrite crossing types).
@@ -54,10 +60,16 @@ end
 
 -- 9) Array positions + named keys mixed in initializer.
 function test_array_plus_named()
-    local a = {1, 2, ['b']=3, ['c']=4} -- opt by oLua
+    local a = { 1, 2 }
+    a.b = 3
+    a.c = 4
 end
 
 -- 10) Multi-line RHS constructor: all lines must be removed.
 function test_multiline_rhs()
-    local a = {['f']={1, 2, 3}, ['g']=5} -- opt by oLua
+    local a = {}
+    a.f = {
+        1, 2, 3
+    }
+    a.g = 5
 end

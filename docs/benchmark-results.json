@@ -1,0 +1,176 @@
+{
+  "generated_at": "2026-11-10T20:19:25.293232+08:00",
+  "optimizer_go_sources_sha256": "c430a6725f6b325c2a960f710a2ff98fd45f0c851f44724110cdee2830505746",
+  "environment": {
+    "platform": "Linux-6.12.113+-x86_64-with-glibc2.41",
+    "cpu": "Intel(R) Xeon(R) Processor",
+    "lua": "Lua 5.4.7  Copyright (C) 1994-2024 Lua.org, PUC-Rio",
+    "lua_path": "/home/box/.local/bin/lua",
+    "go": "go version go1.27.3 linux/amd64"
+  },
+  "flags": [
+    "-opt_const_fold",
+    "-opt_table_constructor",
+    "-opt_localize_globals",
+    "-opt_licm",
+    "-opt_table_access"
+  ],
+  "warmups": 2,
+  "repeats": 7,
+  "batch": 3,
+  "timer": "Lua os.clock CPU seconds per function invocation; alternating paired order; GC before each timed batch",
+  "results": [
+    {
+      "workload": "arithmetic_filter",
+      "fixture_sha256": "a92bbe62f03b703db82c764bc9671db12cdea948517429670e6a50c579482dae",
+      "original_bytes": 259,
+      "optimized_bytes": 239,
+      "original": {
+        "median_ms": 1.539,
+        "min_ms": 1.445,
+        "max_ms": 1.592,
+        "stdev_ms": 0.05197569481887434,
+        "samples_seconds": [
+          0.001585,
+          0.001539,
+          0.001524667,
+          0.001445,
+          0.001565333,
+          0.001498667,
+          0.001592
+        ]
+      },
+      "optimized": {
+        "median_ms": 1.171667,
+        "min_ms": 1.130333,
+        "max_ms": 1.234,
+        "stdev_ms": 0.03190462324237815,
+        "samples_seconds": [
+          0.001130333,
+          0.001166667,
+          0.001153667,
+          0.001174333,
+          0.001171667,
+          0.001185333,
+          0.001234
+        ]
+      },
+      "median_time_ratio_original_over_optimized": 1.3135131398255646,
+      "checksum": "checksum=280001400000"
+    },
+    {
+      "workload": "config_reduce",
+      "fixture_sha256": "52e90b468dfaab77487fbdfbc496b65815294cca951fe67240ec9fe39c74b9bf",
+      "original_bytes": 298,
+      "optimized_bytes": 396,
+      "original": {
+        "median_ms": 7.514667,
+        "min_ms": 7.334333,
+        "max_ms": 8.304667,
+        "stdev_ms": 0.3256272630060473,
+        "samples_seconds": [
+          0.007514667,
+          0.007690333,
+          0.007411,
+          0.007334333,
+          0.007532333,
+          0.007481667,
+          0.008304667
+        ]
+      },
+      "optimized": {
+        "median_ms": 5.013333,
+        "min_ms": 4.754333,
+        "max_ms": 5.0969999999999995,
+        "stdev_ms": 0.12157087411856662,
+        "samples_seconds": [
+          0.005013333,
+          0.005006667,
+          0.004754333,
+          0.00486,
+          0.005014667,
+          0.005063667,
+          0.005097
+        ]
+      },
+      "median_time_ratio_original_over_optimized": 1.4989363363654478,
+      "checksum": "checksum=100006700000"
+    },
+    {
+      "workload": "constructor_records",
+      "fixture_sha256": "8357e90ffec3b39d2a64b8f01b09ba2c6a1843a13fc199e652a3180aed25c520",
+      "original_bytes": 302,
+      "optimized_bytes": 291,
+      "original": {
+        "median_ms": 29.596332999999998,
+        "min_ms": 29.109666999999998,
+        "max_ms": 30.889333,
+        "stdev_ms": 0.5978233556148671,
+        "samples_seconds": [
+          0.029668,
+          0.030889333,
+          0.029657667,
+          0.029383667,
+          0.029156667,
+          0.029109667,
+          0.029596333
+        ]
+      },
+      "optimized": {
+        "median_ms": 16.836667,
+        "min_ms": 16.647,
+        "max_ms": 20.523,
+        "stdev_ms": 1.3930517746696076,
+        "samples_seconds": [
+          0.017423333,
+          0.020523,
+          0.016748333,
+          0.016910333,
+          0.016647,
+          0.016814667,
+          0.016836667
+        ]
+      },
+      "median_time_ratio_original_over_optimized": 1.757849876106714,
+      "checksum": "checksum=1000000"
+    },
+    {
+      "workload": "invoice_batch",
+      "fixture_sha256": "e732397a48e6ebbcca99ca23bf8263dcbea3e7ecebb16dbd5dc8596e7b9e1c72",
+      "original_bytes": 670,
+      "optimized_bytes": 670,
+      "original": {
+        "median_ms": 2.432,
+        "min_ms": 2.340667,
+        "max_ms": 2.4946669999999997,
+        "stdev_ms": 0.05785190438813,
+        "samples_seconds": [
+          0.002340667,
+          0.002448,
+          0.002361667,
+          0.002432,
+          0.002446,
+          0.002359333,
+          0.002494667
+        ]
+      },
+      "optimized": {
+        "median_ms": 2.402333,
+        "min_ms": 2.356,
+        "max_ms": 2.501667,
+        "stdev_ms": 0.0500685123206192,
+        "samples_seconds": [
+          0.002438,
+          0.002501667,
+          0.002375667,
+          0.002356,
+          0.002402333,
+          0.002438333,
+          0.002379
+        ]
+      },
+      "median_time_ratio_original_over_optimized": 1.012349245504266,
+      "checksum": "checksum=29366340"
+    }
+  ]
+}

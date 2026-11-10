@@ -24,19 +24,17 @@ end
 
 -- method calls are not string.format; only two string.format -> hoist format
 function with_methods()
-    local format = string.format -- opt by oLua
     o:format()
     o:format()
     o:format()
-    format("%s", 1)
-    format("%s", 2)
+    string.format("%s", 1)
+    string.format("%s", 2)
 end
 
 -- nested function body excluded from outer counts (outer has only 1 print)
 function outer_only_one()
     print(1)
     local function inner()
-        local print = print -- opt by oLua
         print(2)
         print(3)
         print(4)
@@ -46,10 +44,9 @@ end
 
 -- conflict alias: local format exists, string.format should get format_1
 function conflict_format()
-    local format_1 = string.format -- opt by oLua
     local format = 1
-    use(format_1("%d", 1))
-    use(format_1("%d", 2))
+    use(string.format("%d", 1))
+    use(string.format("%d", 2))
     use(format)
 end
 

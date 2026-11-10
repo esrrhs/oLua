@@ -160,6 +160,13 @@ func (t *ctorTree) absorbAssign(rootName string, rootSteps []pathStep, assign *a
 		cur = f.sub
 	}
 
+	// Numeric keys have equivalent spellings (1, 01, 0x1). The legacy
+	// constructor tree keys are textual, so only named/string keys are proven.
+	for _, step := range remainder {
+		if _, ok := step.keyExpr.(*ast.ConstString); !ok {
+			return false
+		}
+	}
 	lastStep := remainder[len(remainder)-1]
 	newField := &ctorField{keyStr: lastStep.keyStr, keyExpr: lastStep.keyExpr}
 	if cons, isCons := value.(*ast.TableConstructor); isCons {
@@ -209,6 +216,18 @@ func findMergeCandidate(block []ast.Stmt) *mergeCandidate {
 			continue
 		}
 		if len(assign.Targets) != 1 || len(assign.Values) != 1 {
+			continue
+		}
+		// Only fresh locals and literal-only, standalone source statements.
+		// Merging arbitrary RHS expressions can remove calls, observe a later
+		// variable value too early, or reorder errors/global __newindex effects.
+		if !assign.LocalDecl || !standaloneConstructorStmt(assign) {
+			continue
+		}
+		if _, ok := assign.Targets[0].(*ast.ConstIdent); !ok {
+			continue
+		}
+		if !safeConstructorLiteral(assign.Values[0]) {
 			continue
 		}
 		cons, isCons := assign.Values[0].(*ast.TableConstructor)
@@ -272,16 +291,22 @@ func findMergeCandidate(block []ast.Stmt) *mergeCandidate {
 		stopped := false
 		for k := i + 1; k < len(block) && !stopped; k++ {
 			nxt := block[k]
+			if !standaloneConstructorStmt(nxt) {
+				break
+			}
 
-			// 跳过 oLua 生成的行
+			// Stop at generated statements too: a generated do block can have effects.
 			nLine := nxt.Line()
 			if nLine > 0 && nLine <= len(gfilecontent) &&
 				strings.Contains(gfilecontent[nLine-1], "-- opt by oLua") {
-				continue
+				break
 			}
 
 			// 尝试吸收
 			if a, isA := nxt.(*ast.Assign); isA {
+				if a.LocalDecl || len(a.Values) != 1 || !safeConstructorLiteral(a.Values[0]) {
+					break
+				}
 				// 尝试折叠
 				snapshot := deepCopyTree(tree)
 				if tree.absorbAssign(rootName, rootSteps, a) {
@@ -308,7 +333,8 @@ func findMergeCandidate(block []ast.Stmt) *mergeCandidate {
 				stopped = true
 				break
 			}
-			// 允许穿插
+			// Do not move a write across even apparently unrelated statements.
+			break
 		}
 
 		if len(absorbed) == 0 {
@@ -510,9 +536,9 @@ func renderField(f *ctorField) string {
 	keyPart := ""
 	switch k := f.keyExpr.(type) {
 	case *ast.ConstIdent:
-		keyPart = "['" + k.Value + "']"
+		keyPart = "[" + quoteLuaString(k.Value) + "]"
 	case *ast.ConstString:
-		keyPart = "['" + k.Value + "']"
+		keyPart = "[" + quoteLuaString(k.Value) + "]"
 	case *ast.ConstInt:
 		keyPart = "[" + k.Value + "]"
 	default:
@@ -548,20 +574,28 @@ func stmtLineRangeIncludingRHS(stmt ast.Stmt) (int, int) {
 	if _, isCons := assign.Values[0].(*ast.TableConstructor); !isCons {
 		return s, e
 	}
-	// RHS 是构造器：扫描 { 与 } 计数
+	// Count code braces only; braces inside quoted strings/comments are opaque.
 	num := 0
 	for i := s; i <= len(gfilecontent); i++ {
-		num += strings.Count(gfilecontent[i-1], "{")
-		num -= strings.Count(gfilecontent[i-1], "}")
-		if num == 0 && i >= s {
-			// 找到匹配的 }，但需要确认这一行确实出现了 {
-			// （若整个 RHS 都在同一行，num 从 0 涨到 0 也算）
+		for _, tok := range luaSourceTokens(gfilecontent[i-1]) {
+			if tok.literal {
+				continue
+			}
+			if tok.text == "{" {
+				num++
+			}
+			if tok.text == "}" {
+				num--
+			}
+		}
+		if num == 0 {
 			if i > e {
 				e = i
 			}
 			break
 		}
 	}
+
 	return s, e
 }
 
@@ -621,4 +655,39 @@ func opt_func_table_constructor(func_decl *ast.FuncDecl) {
 
 	log.Printf("opt table_constructor at: %s:%d (absorbed %d stmts)", gfilename, cand.ctorLine, len(cand.absorbed))
 	goptcount++
+}
+
+// Restrict construction folding to values with no reads, calls, coercions, or
+// sequence fields (which can have duplicate implicit/explicit integer keys).
+func safeConstructorLiteral(e ast.Expr) bool {
+	switch v := e.(type) {
+	case *ast.ConstInt, *ast.ConstFloat, *ast.ConstBool, *ast.ConstNil, *ast.ConstString:
+		return true
+	case *ast.TableConstructor:
+		seen := map[string]bool{}
+		for i, k := range v.Keys {
+			key, ok := canonicalKeyString(k)
+			if _, named := k.(*ast.ConstString); !named {
+				return false
+			}
+			if !ok || seen[key] || !safeConstructorLiteral(v.Vals[i]) {
+				return false
+			}
+			seen[key] = true
+		}
+		return true
+	}
+	return false
+}
+func standaloneConstructorStmt(stmt ast.Stmt) bool {
+	line := stmt.Line()
+	if line < 1 || line > len(gfilecontent) {
+		return false
+	}
+	parsed, err := ast.Parse(gfilecontent[line-1], 1)
+	if err != nil || len(parsed) != 1 {
+		return false
+	}
+	_, ok := parsed[0].(*ast.Assign)
+	return ok
 }

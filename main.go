@@ -18,13 +18,14 @@ var output = flag.String("output", "output.lua", "Output file")
 
 var opt_table_access = flag.Bool("opt_table_access", false, "Optimize table access")
 var opt_table_access_threshold = flag.Int("opt_table_access_threshold", 2, "Minimum read count to trigger table access optimization")
-var opt_table_access_pure_funcs = flag.String("opt_table_access_pure_funcs", "log_.*", "Comma-separated regex patterns for pure functions that don't modify arguments (in addition to built-in whitelist)")
-var opt_table_access_global = flag.Bool("opt_table_access_global", false, "Also optimize _G.xxx access (disabled by default for readability)")
+var opt_table_access_pure_funcs = flag.String("opt_table_access_pure_funcs", "log_.*", "Legacy name-pattern hint; cannot bypass the private-table safety proof")
+var opt_table_access_global = flag.Bool("opt_table_access_global", false, "Legacy compatibility flag; global tables still require a safety proof")
 var opt_table_constructor = flag.Bool("opt_table_constructor", false, "Optimize table constructor")
 var opt_const_fold = flag.Bool("opt_const_fold", false, "Constant folding and if true/false dead code elimination")
+var unsafe_assume_static_globals = flag.Bool("unsafe_assume_static_globals", false, "UNSAFE: assume a stable plain _ENV, libraries and global functions with no rebinding or lookup effects")
 var opt_localize_globals = flag.Bool("opt_localize_globals", false, "Localize frequently used globals/library functions")
 var opt_localize_globals_threshold = flag.Int("opt_localize_globals_threshold", 2, "Minimum read count to trigger localize globals optimization")
-var opt_licm = flag.Bool("opt_licm", false, "Loop-invariant code motion (hoist invariant table paths out of loops)")
+var opt_licm = flag.Bool("opt_licm", false, "Loop-invariant code motion for proven private immutable table paths")
 var opt_licm_threshold = flag.Int("opt_licm_threshold", 2, "Minimum body read count to trigger LICM (clamped to >= 2)")
 
 var has_opt bool
@@ -114,7 +115,10 @@ func opt(input string, output string) error {
 		return fmt.Errorf("write_file failed: %w", err)
 	}
 	has_opt = true
-	for has_opt {
+	for iteration := 0; has_opt; iteration++ {
+		if iteration >= 1000 {
+			return fmt.Errorf("optimizer did not converge after 1000 iterations")
+		}
 		has_opt = false
 		if err := read_file(output); err != nil {
 			return fmt.Errorf("read_file failed: %w", err)

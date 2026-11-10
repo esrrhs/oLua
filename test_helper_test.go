@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"testing"
 
@@ -43,19 +44,21 @@ func parseSource(source string) ([]ast.Stmt, error) {
 
 // passFlagSnapshot holds all optimizer pass toggles/thresholds for save/restore.
 type passFlagSnapshot struct {
-	tableAccess            bool
-	tableAccessThreshold   int
-	tableAccessGlobal      bool
-	tableConstructor       bool
-	constFold              bool
-	localizeGlobals        bool
-	localizeGlobalsThresh  int
-	licm                   bool
-	licmThreshold          int
+	staticGlobals         bool
+	tableAccess           bool
+	tableAccessThreshold  int
+	tableAccessGlobal     bool
+	tableConstructor      bool
+	constFold             bool
+	localizeGlobals       bool
+	localizeGlobalsThresh int
+	licm                  bool
+	licmThreshold         int
 }
 
 func snapshotPassFlags() passFlagSnapshot {
 	return passFlagSnapshot{
+		staticGlobals:         *unsafe_assume_static_globals,
 		tableAccess:           *opt_table_access,
 		tableAccessThreshold:  *opt_table_access_threshold,
 		tableAccessGlobal:     *opt_table_access_global,
@@ -69,6 +72,7 @@ func snapshotPassFlags() passFlagSnapshot {
 }
 
 func restorePassFlags(s passFlagSnapshot) {
+	*unsafe_assume_static_globals = s.staticGlobals
 	*opt_table_access = s.tableAccess
 	*opt_table_access_threshold = s.tableAccessThreshold
 	*opt_table_access_global = s.tableAccessGlobal
@@ -81,6 +85,7 @@ func restorePassFlags(s passFlagSnapshot) {
 }
 
 func disableAllPasses() {
+	*unsafe_assume_static_globals = false
 	*opt_table_access = false
 	*opt_table_constructor = false
 	*opt_const_fold = false
@@ -102,7 +107,10 @@ func withPassFlags(t *testing.T, enable func(), body func()) {
 // runOptLuaIterations runs the shared iterative opt_lua loop on gfilecontent.
 func runOptLuaIterations() error {
 	has_opt = true
-	for has_opt {
+	for iteration := 0; has_opt; iteration++ {
+		if iteration >= 1000 {
+			return fmt.Errorf("optimizer did not converge after 1000 iterations")
+		}
 		has_opt = false
 		source := ""
 		for _, line := range gfilecontent {
@@ -199,7 +207,10 @@ func runOptimizer(inputFile string) ([]string, error) {
 
 	// 迭代优化
 	has_opt = true
-	for has_opt {
+	for iteration := 0; has_opt; iteration++ {
+		if iteration >= 1000 {
+			return nil, fmt.Errorf("optimizer did not converge after 1000 iterations")
+		}
 		has_opt = false
 		source := ""
 		for _, line := range gfilecontent {

@@ -15,275 +15,36 @@
 - [x] 常量折叠 / 死代码消除（`-opt_const_fold`）
 
 
-## 优化 Lua 的 table 访问
+## 先保证语义，再考虑提速
 
-### 基本原理
+所有优化默认关闭，只改函数体，不改顶层 chunk。运行时差分回归优先于旧文本
+快照；不能证明安全的场景跳过，不能凭路径未写或“纯函数名字”推断安全。
 
-Lua 中每次 `a.b` 都会触发一次 table 查找。如果在一个作用域内多次访问同一个表路径，可以缓存到 local 变量减少查找次数。
+- **table access / LICM**：仅处理函数最外层新建、纯字面量、不可变的私有
+  local 表，且所有路径及中间表都已知存在。含调用、外部输入/闭包、表写、
+  遮蔽、泛型迭代器等场景不处理。缓存声明支配所有使用点；零次循环也不
+  提前触发 nil 错误或 `__index`。阈值分别是
+  `-opt_table_access_threshold` / `-opt_licm_threshold`，默认及最小值均为 2。
+  旧 `pure_funcs` / `_G` 参数保留兼容，但不能绕过安全证明。
+- **constructor**：只合并新建 local 表后的相邻、独立单行、纯字面量写入；
+  不跨越语句，不合并 RHS 调用/变量读取、全局/字段目标或数值/序列 key。
+- **global / library localize**：单独开 `-opt_localize_globals` 现在会保守跳过。
+  因为 `_ENV`、库表及函数可以重绑或带元方法，目前没有静态稳定性证明。
+  仅当调用者能保证环境/库无元方法、无间接重绑且始终稳定，才可额外显式开
+  `-unsafe_assume_static_globals` 恢复白名单局部化（**不是语义保证**）。
+  阈值 `-opt_localize_globals_threshold` 默认 2。
+- **const fold / DCE**：`-opt_const_fold` 保留 Lua 64 位整数精度/回绕、精确
+  整除/取模和比较；消除 `if true/false` 时保留 `do/end` 词法作用域和 return。
+  替换基于代码 token，不误改字符串/注释，结果保留括号。混合超大整数浮点
+  比较、字符串常量、浮点除法/整除/取模/幂、零除和非有限结果保留到运行时。
+  同行多 if、跳转分支及不能精确编辑的场景跳过。
 
-例如：
-```lua
-local x = a.b.c
-local y = a.b.d
-local z = a.b.e
-```
-优化为：
-```lua
-local a_b = a.b -- opt by oLua
-local x = a_b.c
-local y = a_b.d
-local z = a_b.e
-```
+支持目标为 Lua 5.3/5.4（64 位整数、IEEE double）；解析器并不覆盖所有 Lua 5.4
+语法（如 local attributes）。有意收紧了此前未经证明的优化；旧快照也对应更新，
+不是把错误结果当标准。另有“安全场景确实发生改写”的正向测试，避免全部 no-op。
 
-### 读写分析
-
-不同于简单的模式匹配，oLua 使用**读写分析**（Read/Write Analysis）来判断什么时候缓存仍然有效：
-
-- **写操作会使缓存失效**：`a.b = {}`、`a = ...`（父级写）、`func1(a)`（函数可能修改 a 的字段）等
-- **写操作之后的读，需要刷新缓存**
-
-例如：
-```lua
-local x = a.b.c
-local y = a.b.d
-func1(a)         -- 函数可能修改 a，使 a.b 缓存失效
-local z = a.b.e
-local w = a.b.f
-```
-优化为：
-```lua
-local a_b = a.b -- opt by oLua
-local x = a_b.c
-local y = a_b.d
-func1(a)
-a_b = a.b -- opt by oLua（自动刷新）
-local z = a_b.e
-local w = a_b.f
-```
-
-### 失效规则细节
-
-- `func1(a.b)` 传入的是 `a.b` 的**值引用**，不能修改 `a` 表上 `b` 字段的绑定，所以 **a.b 缓存仍有效**
-- `func1(a.b)` 中函数可以修改 `a.b` 内部的字段（如 `arg.x = 1`），所以 **a.b.x 等子级缓存会失效**
-- `func1(a)` 传入 `a` 整个表的引用，可以做 `a.b = xxx`，所以 **a.b 缓存失效**
-- `a.b:method()` 中 `self = a.b`，可以修改 `a.b` 内部字段，所以 **a.b 仍有效，子级失效**
-- `a:method()` 中 `self = a`，可以修改 `a.b`，所以 **a.b 失效**
-
-### 纯函数白名单
-
-某些函数确实不修改参数（如 `print`、`tostring`、`pairs`、`math.floor`），oLua 内置了常用纯函数白名单。匹配的调用不会使缓存失效。
-
-用户也可以通过 `-opt_table_access_pure_funcs` 添加自定义纯函数（**正则表达式**，逗号分隔）：
-
-```bash
-./oLua -input file.lua -output out.lua -opt_table_access \
-       -opt_table_access_pure_funcs "log_.*,debug_.*,trace_.*"
-```
-
-默认值 `log_.*` 匹配 `log_info`, `log_error`, `log_debug` 等日志函数。
-
-### 命令行参数
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `-opt_table_access` | `false` | 启用 table 访问优化 |
-| `-opt_table_access_threshold` | `2` | 触发优化的最少读取次数（最小为 2） |
-| `-opt_table_access_pure_funcs` | `log_.*` | 纯函数正则表达式列表（逗号分隔） |
-| `-opt_table_access_global` | `false` | 是否优化 `_G.xxx` 形式（默认关闭，开启后影响可读性） |
-
-### 安全保证
-
-oLua 的 table 访问优化基于严格的读写分析，对以下场景**安全**：
-- 各种 if/else/while/for/repeat/do-end 复合语句的混合
-- 跨语句的连续读取
-- 函数调用使父级表失效后的自动刷新
-- 方法调用 `:method()` 的 self 失效语义
-- 多行 table 构造器中的多次访问
-- 嵌套循环和嵌套条件
-
-并通过以下机制避免破坏代码：
-- 变量名冲突自动检测（生成 `a_b_1` 等替代名）
-- 跳过已优化的代码行（避免重复优化）
-- 父子路径冲突检测（同一轮不同时优化父和子）
-- 复合语句中"条件先于 body 执行"的语义建模
-- 保守处理 `goto`/`label`（控制流跳转打断分析）
-
-## 优化 Lua 的 table 构造
-
-### 基本原理
-
-Lua 的构造器字面量一次性把所有键值写入，避免多次赋值触发的 hash 表 rehash 与 array 部分扩容。所以把散落的 `a.k = v` 尽量回收进构造器可以显著减少运行时开销。
-
-例如如下代码：
-```lua
-local a = { a = 1, 2 }
-a.b = 1
-a["c"] = 2
-a[3] = 3
-a.d = { e = 4 }
-a.d.f = 5
-```
-优化为：
-```lua
-local a = {['a']=1, 2, ['b']=1, ['c']=2, [3]=3, ['d']={['e']=4, ['f']=5}}
-```
-
-### 算法能力
-
-同样基于读写分析，不做危险合并：
-
-- **允许无关语句穿插**：中间夹了 `local x = 5`、`print(...)` 等不涉及目标表的语句，会跳过继续吸收后续 `a.k = v`
-- **嵌套构造器递归合并**：`a.d = { e=1 }` 之后的 `a.d.f = 2`、`a.d.g = 3` 会被递归折进 `a.d` 内层
-- **同键最后写入胜出**：`a.x=1; a.y=2; a.x=3` 合并为 `{['x']=3, ['y']=2}`，前面的被丢弃
-- **子表被叶子覆盖**：`a.d = {e=1}` 后跟 `a.d = 5` 正确合并为 `d=5`
-- **非 local 目标**：`s.o = {}` 后跟 `s.o.k = v` 也能合并（任意静态路径根）
-- **数组位 + 命名混合**：`{1, 2}` 后跟 `a.b = 3` 合并为 `{1, 2, ['b']=3}`
-- **多行 RHS 构造器**：`a.f = {\n 1,2,3 \n}` 被吸收时自动删除所有相关行
-
-### 停止规则（保证语义）
-
-一旦扫描到以下情况就停止吸收，避免语义变化：
-
-- **读目标表**：`y = a.c` 或 `if a.b then ...` —— 合并会让原本 `nil` 的字段变成有值
-- **写目标或修改目标的调用**：`a[b] = 5`（动态 key）、`f(a)`（可能改 a）—— 直接触发失效
-- **RHS 读/改目标**：`a.c = a.b + 1` 或 `a.c = f(a)` —— 合并会改变求值时刻
-- **动态 key**：`a[var] = 5` 不接受编译期非常量的 key
-- **循环 / goto / label**：保守停止
-
-### 命令行参数
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `-opt_table_constructor` | `false` | 启用 table 构造优化 |
-
-
-## 局部化全局 / 库函数
-
-### 基本原理
-
-热函数里反复调用同一全局或库函数（`print`、`string.format`、`math.floor` 等）时，每次都会经 `_ENV` 查表。在函数入口提升为 local 可去掉这些查找。
-
-例如：
-```lua
-function hot()
-    print(1)
-    print(2)
-    print(string.format("%d", 3))
-    print(string.format("%d", 4))
-end
-```
-优化为：
-```lua
-function hot()
-    local print, format = print, string.format -- opt by oLua
-    print(1)
-    print(2)
-    print(format("%d", 3))
-    print(format("%d", 4))
-end
-```
-
-### 规则（v1）
-
-- 仅处理固定白名单（常用裸全局、`math.*`、`string.*`、`table.concat`、`os.clock` / `os.time` / `os.date`）
-- 同一函数内读取次数达到 `-opt_localize_globals_threshold` 才提升
-- 若该名（或库根）已是 local、函数内对全局/父路径有赋值、或重绑定 `_ENV` / `_G`，则跳过
-- 方法调用 `o:format()` / 字段 `o.format` 不视为 `string.format`
-- 嵌套函数体单独分析；已有 `-- opt by oLua` 行不改写
-
-### 命令行参数
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `-opt_localize_globals` | `false` | 启用全局 / 库函数局部化 |
-| `-opt_localize_globals_threshold` | `2` | 触发局部化的最少读取次数 |
-
-
-## 循环不变量外提（LICM）
-
-### 基本原理
-
-当循环内多次读取同一个静态表路径，且循环内没有任何写/失效时，oLua 在循环头之前插入 local，并改写循环体（以及 while/repeat 条件）中的读取。
-
-例如：
-```lua
-function hot(a)
-    for i = 1, 100 do
-        local x = a.b.c + i
-        local y = a.b.d + i
-        local z = a.b.e + i
-    end
-end
-```
-优化为：
-```lua
-function hot(a)
-    local a_b = a.b -- opt by oLua
-    for i = 1, 100 do
-        local x = a_b.c + i
-        local y = a_b.d + i
-        local z = a_b.e + i
-    end
-end
-```
-
-### 规则（v1）
-
-- 仅处理 `getExprPath` 得到的静态点分路径（动态 key 不支持）
-- 循环体（含 while/repeat 条件）读取次数达到 `-opt_licm_threshold`（下限 2）
-- 循环内出现 `goto` / `label` / `break` 则整段跳过
-- 路径含 for 迭代变量则跳过
-- 循环内对该路径有写/失效，或存在非纯函数调用，则跳过
-- 嵌套函数体单独分析；每轮只外提一次
-
-### 命令行参数
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `-opt_licm` | `false` | 启用循环不变量外提 |
-| `-opt_licm_threshold` | `2` | 触发外提的最少读取次数（最小为 2） |
-
-
-
-## 常量折叠 / 死代码消除
-
-### 基本原理
-
-对纯常量算术、关系、布尔表达式做折叠；对 `if true` / `if false` 做死代码消除（注意 Lua 真值：只处理布尔 `true`/`false`，不会对 `if 0` 做 DCE）。
-
-例如：
-```lua
-function f()
-    local x = 2 + 3 * 4
-    if false then
-        print("dead")
-    else
-        print("alive")
-    end
-end
-```
-优化为：
-```lua
-function f()
-    local x = 14 -- opt by oLua
-        print("alive") -- opt by oLua
-end
-```
-
-### 规则（v1）
-
-- 折叠纯常量算术（`+ - * / // % ^` 与一元 `-`）、关系（`== ~= < > <= >=`）、布尔（`and or not`）
-- 跳过除零/取模零；不折叠位运算、连接、长度运算
-- DCE 仅针对 `if true` / `if false`（不对 `if 0` 等真值常量）
-- 若 if 的 then/else 含 `goto` / `break` / `label` 则跳过 DCE
-- 每轮只做一次折叠或一次 DCE；嵌套函数单独分析
-
-### 命令行参数
-
-| 参数 | 默认 | 说明 |
-|------|------|------|
-| `-opt_const_fold` | `false` | 启用常量折叠与 if true/false DCE |
-
+管线：const fold/DCE → constructor → localize → LICM → table access。
+重解析最多 1,000 轮，未收敛会报错，避免多优化组合挂死。
 
 ## 使用
 
@@ -325,41 +86,24 @@ go build
 
 批量模式下，单个文件解析失败不会终止整个流程，会跳过该文件继续处理其他文件。
 
-## 效果
+## 测试、覆盖率与 Lua 实际性能
 
-实测对比（PUC Lua 5.4.8，每个场景跑 3 次取最快）：
+测试必须有 Lua 5.3 或 5.4，缺失会失败，不会静默跳过。`OLUA_LUA` 可设单个
+可执行文件，或用冒号分隔显式要求多个版本。
 
-| 场景 | 描述 | 优化前 | 优化后 | 提速 |
-|------|------|--------|--------|------|
-| 浅层多读 | 500 万次游戏 update（`self.physics.velocity.x` 等典型字段访问） | 0.78 s | 0.40 s | **~1.95×** |
-| 深层链 | 100 万次 8 层链 `a.b.c.d.e.f.g.h`，每次 4 读 | 0.088 s | 0.026 s | **~3.4×** |
-| 业务热点 | 5000 轮 × 1000 条数据，分支命中后才优化 | 0.32 s | 0.30 s | ~1.07× |
-
-业务代码典型场景（重复访问 `self.xxx.yyy.zzz`）大约 **1.5×~2× 提速**；极端深层访问可达 **3×+**；冷路径或访问次数少的代码不会被改动也不会有副作用。
-
-table 构造优化：
-
-|   | 优化前   | 优化后  |
-|---|-------|------|
-| table 构造 | 3.3 s | 1.9 s |
-
-## 测试
-
-运行单元测试：
 ```bash
-go test ./...
-```
-
-查看代码覆盖率：
-```bash
-go test -coverprofile=coverage.out ./...
+go test -count=1 ./...
+go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
+go vet ./...
 go tool cover -func=coverage.out
+python3 scripts/benchmark_lua.py --lua lua --output lua-benchmark.json
 ```
 
-运行性能基准测试：
-```bash
-go test -bench=. -benchtime=1s -run="^$" ./...
-```
+详见 [验证说明与实测数据](docs/VALIDATION.md)：返回值（含类型及 nil）、输出、
+副作用和错误差分，五个开关的全部 32 种组合，重复优化幂等，以及数值边界网格。
+Python 工具实际执行 Lua，检查 checksum，预热、交替配对多次测量 CPU 时间，
+同时报告源码字节数和波动。工作负载内核的收益不代表生产应用整体提速。
+CI 强制安装 Lua 5.3/5.4，执行 race/覆盖率和基准 smoke，并保留报告。
 
 ## 其他
 [lua全家桶](https://github.com/esrrhs/lua-family-bucket)

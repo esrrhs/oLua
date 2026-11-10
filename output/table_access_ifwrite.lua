@@ -3,26 +3,23 @@
 function test_if_child_write()
     -- a.b.c = ... is NOT a write to a.b (only invalidates a.b.c)
     -- So a.b should be cacheable across the entire function
-    local a_b = a.b -- opt by oLua
-    local x = a_b.c
-    local y = a_b.d
+    local x = a.b.c
+    local y = a.b.d
     if cond then
-        a_b.e = 100  -- writes a_b.e, but NOT a_b itself
-        a_b.f = 200  -- writes a_b.f, but NOT a_b itself
+        a.b.e = 100  -- writes a.b.e, but NOT a.b itself
+        a.b.f = 200  -- writes a.b.f, but NOT a.b itself
     end
-    local z = a_b.g
-    local w = a_b.h
+    local z = a.b.g
+    local w = a.b.h
 end
 
 function test_if_direct_write()
     -- a.b = ... IS a write to a.b (invalidates)
-    local a_b = a.b -- opt by oLua
-    local x = a_b.c
-    local y = a_b.d
+    local x = a.b.c
+    local y = a.b.d
     if cond then
         a.b = {}  -- writes a.b directly
     end
-    a_b = a.b -- opt by oLua
-    local z = a_b.e
-    local w = a_b.f
+    local z = a.b.e
+    local w = a.b.f
 end

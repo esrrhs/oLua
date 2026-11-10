@@ -10,9 +10,14 @@ function test()
 
         local b = 4
 
-        local a = {['a']=1, 2, ['b']={}, ['c']=3, [3]=4} -- opt by oLua
+        local a = { a = 1, 2 }
+        a.b = {}
+        a["c"] = 3
+        a[3] = 4
         a[b] = 5
-        a.d = {['e']=6, ['f']=7, [1]=8} -- opt by oLua
+        a.d = { e = 6 }
+        a.d.f = 7
+        a.d[1] = 8
         a.e = os.time() or 0
         a.f = {
             1, 2, 3

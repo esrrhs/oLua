@@ -4,13 +4,12 @@
 function test_if_cond_read_body_write()
     -- v.TLogEventID 被缓存后，if 条件中的读应该继续使用缓存
     -- 即使 if body 内的函数调用使 target 失效
-    local v_TLogEventID = v.TLogEventID -- opt by oLua
-    local x = v_TLogEventID
-    local y = v_TLogEventID
-    if v_TLogEventID == 301125 and ss.data then
+    local x = v.TLogEventID
+    local y = v.TLogEventID
+    if v.TLogEventID == 301125 and ss.data then
         ss.data.gyroscope_status = v.reason or 0
     end
-    if v_TLogEventID == 10902 or v_TLogEventID == 300262 then
+    if v.TLogEventID == 10902 or v.TLogEventID == 300262 then
         report_virtual_voucher_player_behavior(ss, v)
     end
     if v.TLogEventID == 10049 then
@@ -20,14 +19,12 @@ end
 
 function test_while_cond_read_body_write()
     -- while 条件中的读也是先执行的
-    local a_b = a.b -- opt by oLua
-    local x = a_b.c
-    local y = a_b.d
+    local x = a.b.c
+    local y = a.b.d
     while a.b.active do
         func1(a)  -- 使 a.b 失效
         break
     end
-    a_b = a.b -- opt by oLua
-    local z = a_b.e
-    local w = a_b.f
+    local z = a.b.e
+    local w = a.b.f
 end

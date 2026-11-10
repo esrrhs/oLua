@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/milochristiansen/lua/ast"
 	"math"
 	"strings"
@@ -237,7 +238,7 @@ func expr_to_string(expr ast.Expr) string {
 		}
 		expr_str += "}"
 	case *ast.ConstString:
-		expr_str = "'" + expr.(*ast.ConstString).Value + "'"
+		expr_str = quoteLuaString(expr.(*ast.ConstString).Value)
 	case *ast.ConstInt:
 		expr_str = expr.(*ast.ConstInt).Value
 	case *ast.ConstFloat:
@@ -433,4 +434,24 @@ func find_stmt_line_range(stmt ast.Node) (int, int) {
 	}
 
 	return min_line, max_line
+}
+
+// Quote bytes, not Go runes: Lua decimal escapes are always three digits so a
+// following digit cannot become part of the escape.
+func quoteLuaString(s string) string {
+	var b strings.Builder
+	b.WriteByte('\'')
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\'' || c == '\\' {
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		} else if c < 32 || c == 127 {
+			fmt.Fprintf(&b, "\\%03d", c)
+		} else {
+			b.WriteByte(c)
+		}
+	}
+	b.WriteByte('\'')
+	return b.String()
 }

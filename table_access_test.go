@@ -120,7 +120,7 @@ func TestPathsRelated(t *testing.T) {
 		{"a.b.c", "a.b", true},                    // b 是 a 的前缀
 		{"a.b", "x.y", false},                     // 不相关
 		{"a.b", "a.bc", false},                    // 不是点号边界
-		{"self.physics", "self.transform", false},  // 兄弟路径
+		{"self.physics", "self.transform", false}, // 兄弟路径
 	}
 	for _, tt := range tests {
 		got := pathsRelated(tt.a, tt.b)
@@ -176,8 +176,8 @@ func TestContainTableAccess(t *testing.T) {
 	}{
 		{"x = a.b.c + a.b.d", "a.b", 2},
 		{"local a_b = a.b", "a.b", 1},
-		{"xa.b.c = 1", "a.b", 0},       // 前面有字母
-		{"a.bc = 1", "a.b", 0},         // 后面有字母
+		{"xa.b.c = 1", "a.b", 0}, // 前面有字母
+		{"a.bc = 1", "a.b", 0},   // 后面有字母
 		{"a.b = a.b + a.b", "a.b", 3},
 		{"nothing here", "a.b", 0},
 	}
@@ -198,8 +198,8 @@ func TestReplaceTableAccess(t *testing.T) {
 	}{
 		{"x = a.b.c", "a.b", "a_b", "x = a_b.c"},
 		{"a.b = a.b + 1", "a.b", "a_b", "a_b = a_b + 1"},
-		{"xa.b = 1", "a.b", "a_b", "xa.b = 1"},       // 前面有字母，不替换
-		{"a.bc = 1", "a.b", "a_b", "a.bc = 1"},       // 后面有字母，不替换
+		{"xa.b = 1", "a.b", "a_b", "xa.b = 1"}, // 前面有字母，不替换
+		{"a.bc = 1", "a.b", "a_b", "a.bc = 1"}, // 后面有字母，不替换
 		{"if a.b then a.b.c = 1 end", "a.b", "a_b", "if a_b then a_b.c = 1 end"},
 	}
 	for _, tt := range tests {
@@ -214,57 +214,35 @@ func TestReplaceTableAccess(t *testing.T) {
 // 阈值测试
 // ============================================================================
 
-func TestThreshold3(t *testing.T) {
-	// threshold=3 时，每组只有 2 次读的函数不应被优化
-	*opt_table_access_threshold = 3
-	defer func() { *opt_table_access_threshold = 2 }()
-
-	actual, err := runOptimizer("input/table_access_advanced.lua")
-	if err != nil {
-		t.Fatalf("optimizer failed: %v", err)
+func TestSafeTableAccessThresholds(t *testing.T) {
+	source := `local function f()
+    local a={b=2}
+    local x=a.b
+    local y=a.b
+    local z=a.b
+    return x+y+z
+end
+return f()
+`
+	for _, threshold := range []int{1, 2, 3, 4} {
+		t.Run(fmt.Sprint(threshold), func(t *testing.T) {
+			old := *opt_table_access_threshold
+			defer func() { *opt_table_access_threshold = old }()
+			*opt_table_access_threshold = threshold
+			got := optimizeSource(t, source, 16)
+			changed := strings.Contains(got, "-- opt by oLua")
+			if changed != (threshold <= 3) {
+				t.Fatalf("threshold=%d changed=%v\n%s", threshold, changed, got)
+			}
+		})
 	}
-
-	result := strings.Join(actual, "\n")
-
-	// test_basic_reads 有 3 次读 → 应被优化
-	if !strings.Contains(result, "local a_b = a.b -- opt by oLua") {
-		t.Error("test_basic_reads should be optimized with threshold=3 (has 3 reads)")
-	}
-
-	// test_write_interruption 每组只有 2 次读 → 不应被优化
-	inFunc := false
-	funcOptimized := false
-	for _, line := range actual {
-		if strings.Contains(line, "function test_write_interruption") {
-			inFunc = true
-			continue
-		}
-		if inFunc && strings.HasPrefix(strings.TrimSpace(line), "function ") {
-			break
-		}
-		if inFunc && strings.Contains(line, "-- opt by oLua") {
-			funcOptimized = true
-			break
-		}
-	}
-	if funcOptimized {
-		t.Error("test_write_interruption should NOT be optimized with threshold=3 (only 2 reads per group)")
-	}
-}
-
-func TestThreshold1FallsBackTo2(t *testing.T) {
-	// threshold=1 应被强制为 2（最小值）
+	single := strings.ReplaceAll(strings.ReplaceAll(source, "    local y=a.b\n", ""), "    local z=a.b\n", "")
+	single = strings.ReplaceAll(single, "return x+y+z", "return x")
+	old := *opt_table_access_threshold
+	defer func() { *opt_table_access_threshold = old }()
 	*opt_table_access_threshold = 1
-	defer func() { *opt_table_access_threshold = 2 }()
-
-	actual, err := runOptimizer("input/table_access_advanced.lua")
-	if err != nil {
-		t.Fatalf("optimizer failed: %v", err)
-	}
-
-	result := strings.Join(actual, "\n")
-	if !strings.Contains(result, "-- opt by oLua") {
-		t.Error("threshold=1 should fall back to 2, optimizations should still be applied")
+	if got := optimizeSource(t, single, 16); strings.Contains(got, "-- opt by oLua") {
+		t.Fatal("threshold must clamp to two reads", got)
 	}
 }
 
@@ -280,7 +258,7 @@ func TestGetUniqueLocalNameNoConflict(t *testing.T) {
 	}
 }
 
-func TestGetUniqueLocalNameFallback(t *testing.T) {
+func TestGetUniqueLocalNameBeyond100(t *testing.T) {
 	// 模拟超过 100 次冲突的场景，触发 _opt_ 前缀兜底
 	var lines []string
 	lines = append(lines, "function test()")
@@ -310,8 +288,8 @@ func TestGetUniqueLocalNameFallback(t *testing.T) {
 	}
 
 	name := getUniqueLocalName(funcBlock, "test_var")
-	if name != "_opt_test_var" {
-		t.Errorf("getUniqueLocalName with 100+ conflicts = %q, want \"_opt_test_var\"", name)
+	if name != "test_var_101" {
+		t.Errorf("getUniqueLocalName with 100+ conflicts = %q, want \"test_var_101\"", name)
 	}
 }
 

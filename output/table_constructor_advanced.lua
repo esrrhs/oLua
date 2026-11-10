@@ -2,10 +2,13 @@
 -- nested merging, same-key overwrite, and dynamic-key blocking.
 
 function test_interleave()
-    local a = {['b']=1, ['c']=2, ['d']=3} -- opt by oLua
+    local a = {}
     local x = 5
+    a.b = 1
     print("hello")
+    a.c = 2
     local y = x + 1
+    a.d = 3
 end
 
 function test_nested()
@@ -29,6 +32,7 @@ function test_dynamic_key_blocks()
 end
 
 function test_pure_call_allowed()
-    local a = {['b']=1, ['c']=2} -- opt by oLua
+    local a = {['b']=1} -- opt by oLua
     print("ok")
+    a.c = 2
 end

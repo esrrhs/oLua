@@ -87,6 +87,10 @@ func tryHoistFromLoop(loopStmt ast.Stmt, body []ast.Stmt, reevalExprs []ast.Expr
 		binders = map[string]bool{}
 	}
 
+	proven := privateTablePaths(func_decl)
+	if proven == nil {
+		return false
+	}
 	counts := countLicmBodyReads(body, reevalExprs)
 	type cand struct {
 		path  string
@@ -94,6 +98,9 @@ func tryHoistFromLoop(loopStmt ast.Stmt, body []ast.Stmt, reevalExprs []ast.Expr
 	}
 	var cands []cand
 	for path, n := range counts {
+		if line := proven[path]; line == 0 || line >= loopStmt.Line() {
+			continue
+		}
 		if n < threshold {
 			continue
 		}
@@ -394,6 +401,7 @@ func applyLicmHoist(loopStmt ast.Stmt, body []ast.Stmt, path string, func_decl *
 
 	nestedRanges := collectNestedFuncLineRanges(body)
 
+	changed := false
 	for lineNum := minL; lineNum <= maxL && lineNum <= len(gfilecontent); lineNum++ {
 		if lineInRanges(lineNum, nestedRanges) {
 			continue
@@ -403,8 +411,12 @@ func applyLicmHoist(loopStmt ast.Stmt, body []ast.Stmt, path string, func_decl *
 			continue
 		}
 		gfilecontent[lineNum-1] = replace_table_access(line, path, localName)
+		changed = changed || gfilecontent[lineNum-1] != line
 	}
 
+	if !changed {
+		return false
+	}
 	indent := get_content_space(gfilecontent[headerLine-1])
 	insertLine := indent + "local " + localName + " = " + path + " -- opt by oLua"
 

@@ -13,6 +13,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      OLUA_LUA: lua5.3:lua5.4
     steps:
     - uses: actions/checkout@v4
 
@@ -20,6 +22,13 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version-file: go.mod
+
+    - name: Install required Lua runtimes
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y lua5.3 lua5.4
+        lua5.3 -v
+        lua5.4 -v
 
     - name: Tidy check
       run: |
@@ -33,4 +42,18 @@ jobs:
       run: go build -v ./...
 
     - name: Test
-      run: go test -race -count=1 -v ./...
+      run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out -v ./...
+
+    - name: Coverage summary
+      run: go tool cover -func=coverage.out
+
+    - name: Real Lua benchmark smoke (correctness, no speed threshold)
+      run: python3 scripts/benchmark_lua.py --lua lua5.4 --warmups 1 --repeats 3 --batch 1 --output lua-benchmark-smoke.json
+
+    - name: Validation artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: validation
+        path: |
+          coverage.out
+          lua-benchmark-smoke.json

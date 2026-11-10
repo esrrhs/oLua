@@ -9,7 +9,8 @@ import (
 	"github.com/milochristiansen/lua/ast"
 )
 
-// localizeGlobalsWhitelist v1: bare globals and selected library functions safe to hoist.
+// Candidates under the explicit unsafe static-environment contract only.
+// A whitelist name does not prove a Lua global lookup is safe to hoist.
 var localizeGlobalsWhitelist = map[string]bool{
 	// bare
 	"print": true, "error": true, "assert": true, "type": true,
@@ -40,7 +41,7 @@ type localizeCandidate struct {
 // opt_func_localize_globals hoists frequently-used whitelist globals/lib functions
 // into locals at function entry.
 func opt_func_localize_globals(func_decl *ast.FuncDecl) {
-	if has_opt {
+	if has_opt || !*unsafe_assume_static_globals {
 		return
 	}
 	if func_decl == nil || len(func_decl.Block) == 0 {
@@ -58,6 +59,14 @@ func opt_func_localize_globals(func_decl *ast.FuncDecl) {
 		return
 	}
 
+	// The source rewriter operates line-by-line; it cannot safely interpret
+	// a line beginning inside a long string or escaped multiline string.
+	_, lastBodyLine := funcBodyLineRange(func_decl)
+	for _, tok := range luaSourceTokens(strings.Join(gfilecontent, "\n")) {
+		if tok.line >= func_decl.Line() && tok.line <= lastBodyLine && tok.literal && strings.Contains(tok.text, "\n") {
+			return
+		}
+	}
 	locals := collectFuncLocals(func_decl)
 	hasEnvRebind, writes := scanFuncGlobalWrites(func_decl)
 	if hasEnvRebind {
@@ -80,7 +89,7 @@ func opt_func_localize_globals(func_decl *ast.FuncDecl) {
 			first: firstLine[path],
 		})
 	}
-	if len(candidates) == 0 {
+	if len(candidates) == 0 || len(locals)+len(candidates) >= 190 {
 		return
 	}
 
@@ -92,8 +101,9 @@ func opt_func_localize_globals(func_decl *ast.FuncDecl) {
 	})
 
 	// Allocate aliases (last path segment; rename when that name is already a local/param).
-	// Do not use collectIdentifiers on the whole body: whitelist reads would falsely look like conflicts.
-	usedNames := make(map[string]bool)
+	// Reserve every identifier, including captured/global reads: an alias must
+	// not accidentally shadow an unrelated bare global with the same last segment.
+	usedNames := collectIdentifiers(func_decl.Block)
 	for name := range locals {
 		usedNames[name] = true
 	}
@@ -277,6 +287,9 @@ func countLocalizeReads(func_decl *ast.FuncDecl) (counts map[string]int, firstLi
 
 	var record func(path string, line int)
 	record = func(path string, line int) {
+		if line > 0 && line <= len(gfilecontent) && strings.Contains(gfilecontent[line-1], "-- opt by oLua") {
+			return
+		}
 		if !localizeGlobalsWhitelist[path] {
 			return
 		}

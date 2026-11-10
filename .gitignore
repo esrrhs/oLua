@@ -19,3 +19,7 @@
 
 # Optimizer same-dir temp files from opt_path
 *.olua.tmp
+
+# Local validation reports
+/coverage.out
+/lua-benchmark*.json

@@ -13,13 +13,15 @@ import (
 // 辅助函数
 // ============================================================================
 
-// 内置纯函数白名单：这些函数保证不会修改传入的表参数。
+// Legacy function-name hints, not a semantic purity proof: globals can be
+// rebound and calls such as tostring/pairs may invoke metamethods. The safe
+// production table-access entry does not trust this whitelist.
 var builtinPureFuncs = map[string]bool{
 	// 输出/调试
-	"print":    true,
-	"error":    true,
-	"warn":     true,
-	"assert":   true,
+	"print":  true,
+	"error":  true,
+	"warn":   true,
+	"assert": true,
 	// 类型/元信息
 	"type":     true,
 	"typeof":   true,
@@ -27,22 +29,22 @@ var builtinPureFuncs = map[string]bool{
 	"tonumber": true,
 	"select":   true,
 	// 迭代器（不修改表本身）
-	"pairs":    true,
-	"ipairs":   true,
-	"next":     true,
-	"unpack":   true,
+	"pairs":  true,
+	"ipairs": true,
+	"next":   true,
+	"unpack": true,
 	// 数学
-	"math.abs":   true,
-	"math.ceil":  true,
-	"math.floor": true,
-	"math.max":   true,
-	"math.min":   true,
-	"math.sqrt":  true,
-	"math.sin":   true,
-	"math.cos":   true,
-	"math.tan":   true,
-	"math.log":   true,
-	"math.exp":   true,
+	"math.abs":    true,
+	"math.ceil":   true,
+	"math.floor":  true,
+	"math.max":    true,
+	"math.min":    true,
+	"math.sqrt":   true,
+	"math.sin":    true,
+	"math.cos":    true,
+	"math.tan":    true,
+	"math.log":    true,
+	"math.exp":    true,
 	"math.random": true,
 	// 字符串（不修改表）
 	"string.format": true,
@@ -221,15 +223,12 @@ func getUniqueLocalName(block []ast.Stmt, baseName string) string {
 	if !usedNames[baseName] {
 		return baseName
 	}
-	// 尝试加后缀
-	for i := 1; i <= 100; i++ {
+	for i := 1; ; i++ {
 		candidate := fmt.Sprintf("%s_%d", baseName, i)
 		if !usedNames[candidate] {
 			return candidate
 		}
 	}
-	// 兜底：使用 _opt_ 前缀
-	return "_opt_" + baseName
 }
 
 // isOluaGeneratedName 判断某个变量名是否由 oLua 在之前的 pass 中生成。
@@ -301,8 +300,10 @@ type ReadGroup struct {
 // 对于 target="a.b"：
 //   - a.b.c 读取了 a.b（通过 a.b 访问 c）
 //   - a.b 本身作为值也是读取
+//
 // 注意：内层匿名函数 (function() ... end) 的 body 不算外层的读——
-//   函数定义本身只是个值，不立即执行，且 body 中的 local 作用域独立。
+//
+//	函数定义本身只是个值，不立即执行，且 body 中的 local 作用域独立。
 func exprContainsPathRead(expr ast.Expr, target string) bool {
 	if expr == nil {
 		return false
@@ -1457,32 +1458,7 @@ func contain_table_access(content string, src string) int {
 
 // replace_table_access 将 content 中的 src 替换为 dst（带单词边界检查）。
 func replace_table_access(content string, src string, dst string) string {
-	tmp := content
-	begin := 0
-	for {
-		idx := strings.Index(tmp[begin:], src)
-		if idx == -1 {
-			break
-		}
-		idx += begin
-		if idx > 0 {
-			// 前面不能是 . 或字母数字下划线
-			if tmp[idx-1] == '.' || (tmp[idx-1] >= 'a' && tmp[idx-1] <= 'z') || (tmp[idx-1] >= 'A' && tmp[idx-1] <= 'Z') || (tmp[idx-1] >= '0' && tmp[idx-1] <= '9') || tmp[idx-1] == '_' {
-				begin = idx + len(src)
-				continue
-			}
-		}
-		if idx+len(src) < len(tmp) {
-			// 后面不能是 . 或字母数字下划线
-			if (tmp[idx+len(src)] >= 'a' && tmp[idx+len(src)] <= 'z') || (tmp[idx+len(src)] >= 'A' && tmp[idx+len(src)] <= 'Z') || (tmp[idx+len(src)] >= '0' && tmp[idx+len(src)] <= '9') || tmp[idx+len(src)] == '_' {
-				begin = idx + len(src)
-				continue
-			}
-		}
-		tmp = tmp[:idx] + dst + tmp[idx+len(src):]
-		begin = idx + len(dst)
-	}
-	return tmp
+	return replaceCodePath(content, src, dst)
 }
 
 // ============================================================================
@@ -1491,5 +1467,5 @@ func replace_table_access(content string, src string, dst string) string {
 
 // opt_func_table_access 对单个函数执行表访问优化。
 func opt_func_table_access(func_decl *ast.FuncDecl) {
-	optimizeBlock(func_decl.Block)
+	optimizePrivateTableAccess(func_decl)
 }

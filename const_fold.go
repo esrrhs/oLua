@@ -33,6 +33,9 @@ const (
 func (v foldedValue) lit() string {
 	switch v.kind {
 	case foldInt:
+		if v.i == math.MinInt64 {
+			return "(-9223372036854775807 - 1)"
+		}
 		return strconv.FormatInt(v.i, 10)
 	case foldFloat:
 		return formatFoldFloat(v.f)
@@ -79,13 +82,13 @@ func tryConstFoldInBlock(block []ast.Stmt) {
 	if has_opt {
 		return
 	}
-	for i, stmt := range block {
+	for _, stmt := range block {
 		if has_opt {
 			return
 		}
 		// DCE before folding inside the same if (if header is earlier in source order).
 		if ifs, ok := stmt.(*ast.If); ok {
-			if tryDCEIf(ifs, block, i) {
+			if tryDCEIf(ifs) {
 				return
 			}
 		}
@@ -115,7 +118,7 @@ func tryConstFoldInBlock(block []ast.Stmt) {
 
 // tryDCEIf rewrites/removes if true / if false only (not if 0 / other truthy consts).
 // Skips when then/else contains goto, break, or label.
-func tryDCEIf(ifs *ast.If, parent []ast.Stmt, idx int) bool {
+func tryDCEIf(ifs *ast.If) bool {
 	if has_opt {
 		return true
 	}
@@ -128,162 +131,95 @@ func tryDCEIf(ifs *ast.If, parent []ast.Stmt, idx int) bool {
 		return false
 	}
 
-	ifLine := ifs.Line()
-	if ifLine < 1 || ifLine > len(gfilecontent) {
-		return false
-	}
-	endLine := findIfEndLine(ifs, parent, idx)
-	if endLine < ifLine || endLine > len(gfilecontent) {
-		return false
-	}
-
-	var keep []ast.Stmt
-	if cb.Value {
-		keep = ifs.Then
-	} else {
-		keep = ifs.Else
-	}
-
-	keepLines := collectStmtLinesForDCE(keep, ifLine, endLine)
-	indent := get_content_space(gfilecontent[ifLine-1])
-
-	var newContent []string
-	newContent = append(newContent, gfilecontent[:ifLine-1]...)
-	if len(keepLines) == 0 {
-		newContent = append(newContent, indent+"-- opt by oLua")
-	} else {
-		for i, ln := range keepLines {
-			if i == 0 && !strings.Contains(ln, "-- opt by oLua") {
-				newContent = append(newContent, ln+" -- opt by oLua")
-			} else {
-				newContent = append(newContent, ln)
-			}
+	source := strings.Join(gfilecontent, "\n")
+	tokens := luaSourceTokens(source)
+	start := -1
+	for i, tok := range tokens {
+		if tok.line == ifs.Line() && tok.text == "if" && !tok.literal {
+			if start >= 0 {
+				return false
+			} // ambiguous same-line AST location
+			start = i
 		}
 	}
-	newContent = append(newContent, gfilecontent[endLine:]...)
-	gfilecontent = newContent
+	if start < 0 {
+		return false
+	}
+	// Track actual Lua block keywords, not indentation or words inside strings.
+	depth, thenAt, branchAt, endAt := 0, -1, -1, -1
+	var stack []string
+	for i := start; i < len(tokens); i++ {
+		tok := tokens[i]
+		if tok.literal {
+			continue
+		}
+		switch tok.text {
+		case "if", "function", "repeat":
+			stack = append(stack, tok.text)
+			depth++
+		case "for", "while":
+			depth++
+			stack = append(stack, "loop-header")
+		case "do":
+			if len(stack) > 0 && stack[len(stack)-1] == "loop-header" {
+				stack[len(stack)-1] = "loop"
+			} else {
+				depth++
+				stack = append(stack, "do")
+			}
+		case "then":
+			if depth == 1 && thenAt < 0 {
+				thenAt = i
+			}
+		case "else", "elseif":
+			if depth == 1 && branchAt < 0 {
+				branchAt = i
+			}
+		case "end", "until":
+			if len(stack) == 0 {
+				return false
+			}
+			stack = stack[:len(stack)-1]
+			depth--
+			if depth == 0 {
+				endAt = i
+			}
+		}
+		if endAt >= 0 {
+			break
+		}
+	}
+	if thenAt < 0 || endAt < 0 {
+		return false
+	}
+	body := ""
+	if cb.Value {
+		stop := endAt
+		if branchAt >= 0 {
+			stop = branchAt
+		}
+		body = source[tokens[thenAt].end:tokens[stop].start]
+	} else if branchAt >= 0 {
+		if tokens[branchAt].text == "else" {
+			body = source[tokens[branchAt].end:tokens[endAt].start]
+		} else {
+			// elseif is a nested if in the AST. Retain its closing end.
+			body = "if" + source[tokens[branchAt].end:tokens[endAt].end]
+		}
+	}
+	// An if branch is a lexical scope, even when its condition is constant.
+	// Keeping a do/end also preserves validity of a branch-final return.
+	indent := get_content_space(gfilecontent[ifs.Line()-1])
+	body = strings.TrimLeft(strings.TrimRight(body, " \t\r\n"), "\r\n")
+	replacement := "do -- opt by oLua\n" + body + "\n" + indent + "end"
+	source = source[:tokens[start].start] + replacement + source[tokens[endAt].end:]
+	gfilecontent = strings.Split(source, "\n")
+	ifLine := ifs.Line()
 
 	log.Printf("opt const_fold DCE if %v at: %s:%d", cb.Value, gfilename, ifLine)
 	goptcount++
 	has_opt = true
 	return true
-}
-
-func collectStmtLinesForDCE(keep []ast.Stmt, ifLine, endLine int) []string {
-	if len(keep) == 0 {
-		return nil
-	}
-	minL := math.MaxInt32
-	maxL := -1
-	for _, s := range keep {
-		a, b := find_stmt_line_range(s)
-		if a < 0 {
-			a = s.Line()
-			b = a
-		}
-		if a < minL {
-			minL = a
-		}
-		if b > maxL {
-			maxL = b
-		}
-	}
-	if minL < ifLine+1 {
-		minL = ifLine + 1
-	}
-	if maxL < minL {
-		return nil
-	}
-	if maxL >= endLine {
-		maxL = endLine - 1
-	}
-	ifIndent := len(get_content_space(gfilecontent[ifLine-1]))
-	var out []string
-	for ln := minL; ln <= maxL && ln <= len(gfilecontent); ln++ {
-		trimmed := strings.TrimSpace(gfilecontent[ln-1])
-		lineIndent := len(get_content_space(gfilecontent[ln-1]))
-		if ln > minL && lineIndent == ifIndent {
-			if trimmed == "else" || strings.HasPrefix(trimmed, "else ") ||
-				strings.HasPrefix(trimmed, "elseif ") || trimmed == "end" ||
-				strings.HasPrefix(trimmed, "end ") || strings.HasPrefix(trimmed, "end;") ||
-				strings.HasPrefix(trimmed, "end--") {
-				break
-			}
-		}
-		out = append(out, gfilecontent[ln-1])
-	}
-	return out
-}
-
-func findIfEndLine(ifs *ast.If, parent []ast.Stmt, idx int) int {
-	ifLine := ifs.Line()
-	ifIndent := len(get_content_space(gfilecontent[ifLine-1]))
-	upper := len(gfilecontent) + 1
-	if idx+1 < len(parent) {
-		next := parent[idx+1].Line()
-		if next > 0 {
-			upper = next
-		}
-	}
-	// Prefer forward keyword-depth scan so a later nested/sibling end at the same
-	// indent (e.g. another function's if) is not chosen when the if is last in its block.
-	if end := scanBlockEndLine(ifLine, ifIndent, upper); end >= ifLine {
-		return end
-	}
-	for ln := upper - 1; ln > ifLine; ln-- {
-		if ln < 1 || ln > len(gfilecontent) {
-			continue
-		}
-		trimmed := strings.TrimSpace(gfilecontent[ln-1])
-		if trimmed == "end" || strings.HasPrefix(trimmed, "end ") ||
-			strings.HasPrefix(trimmed, "end;") || strings.HasPrefix(trimmed, "end--") {
-			if len(get_content_space(gfilecontent[ln-1])) == ifIndent {
-				return ln
-			}
-		}
-	}
-	return ifLine
-}
-
-func scanBlockEndLine(ifLine, ifIndent, upper int) int {
-	depth := 0
-	for ln := ifLine; ln < upper && ln <= len(gfilecontent); ln++ {
-		fields := strings.Fields(stripLuaLineComment(gfilecontent[ln-1]))
-		for _, tok := range fields {
-			switch tok {
-			case "if", "while", "for", "function", "repeat":
-				depth++
-			case "end", "until":
-				depth--
-				if depth == 0 && len(get_content_space(gfilecontent[ln-1])) == ifIndent {
-					return ln
-				}
-			}
-		}
-	}
-	if upper-1 >= ifLine {
-		return upper - 1
-	}
-	return ifLine
-}
-
-func stripLuaLineComment(line string) string {
-	inS, inD := false, false
-	for i := 0; i < len(line); i++ {
-		c := line[i]
-		if c == '\'' && !inD {
-			inS = !inS
-			continue
-		}
-		if c == '"' && !inS {
-			inD = !inD
-			continue
-		}
-		if !inS && !inD && c == '-' && i+1 < len(line) && line[i+1] == '-' {
-			return line[:i]
-		}
-	}
-	return line
 }
 
 func ifHasGotoBreakLabel(ifs *ast.If) bool {
@@ -312,7 +248,6 @@ func blockHasGotoBreakLabel(block []ast.Stmt) bool {
 	}
 	return false
 }
-
 
 func tryFoldInStmt(stmt ast.Stmt) bool {
 	if stmt == nil || has_opt {
@@ -426,15 +361,39 @@ func applyConstFold(expr ast.Expr, result foldedValue) bool {
 	if err != nil {
 		return false
 	}
-	loc := re.FindStringIndex(line)
-	if loc == nil {
+	var loc []int
+	offset := 0
+	for i := 0; i < lineNum-1; i++ {
+		offset += len(gfilecontent[i]) + 1
+	}
+	tokens := luaSourceTokens(strings.Join(gfilecontent, "\n"))
+	matches := 0
+	for _, candidate := range re.FindAllStringIndex(line, -1) {
+		startOK, endOK, opaque := false, false, false
+		for _, tok := range tokens {
+			if tok.start == candidate[0]+offset {
+				startOK = true
+			}
+			if tok.end == candidate[1]+offset {
+				endOK = true
+			}
+			if tok.literal && tok.start < candidate[1]+offset && tok.end > candidate[0]+offset {
+				opaque = true
+			}
+		}
+		if startOK && endOK && !opaque {
+			loc = candidate
+			matches++
+		}
+	}
+	if loc == nil || matches != 1 {
 		return false
 	}
 	repl := result.lit()
 	if repl == "" {
 		return false
 	}
-	newLine := line[:loc[0]] + repl + line[loc[1]:]
+	newLine := line[:loc[0]] + "(" + repl + ")" + line[loc[1]:]
 	if !strings.Contains(newLine, "-- opt by oLua") {
 		newLine = newLine + " -- opt by oLua"
 	}
@@ -574,13 +533,13 @@ func evalConstExpr(expr ast.Expr) (foldedValue, bool) {
 	expr = unwrapParens(expr)
 	switch e := expr.(type) {
 	case *ast.ConstInt:
-		i, err := strconv.ParseInt(e.Value, 0, 64)
+		base := 10
+		if strings.HasPrefix(strings.ToLower(e.Value), "0x") {
+			base = 0
+		}
+		i, err := strconv.ParseInt(e.Value, base, 64)
 		if err != nil {
-			f, ferr := strconv.ParseFloat(e.Value, 64)
-			if ferr != nil {
-				return foldedValue{}, false
-			}
-			return foldedValue{kind: foldFloat, f: f}, true
+			return foldedValue{}, false
 		}
 		return foldedValue{kind: foldInt, i: i}, true
 	case *ast.ConstFloat:
@@ -594,7 +553,7 @@ func evalConstExpr(expr ast.Expr) (foldedValue, bool) {
 	case *ast.ConstNil:
 		return foldedValue{kind: foldNil}, true
 	case *ast.ConstString:
-		return foldedValue{kind: foldString, s: e.Value}, true
+		return foldedValue{}, false // escaped strings / locale comparisons stay at runtime
 	case *ast.Operator:
 		return evalConstOp(e)
 	default:
@@ -691,6 +650,12 @@ func evalConstOp(op *ast.Operator) (foldedValue, bool) {
 }
 
 func constEqual(a, b foldedValue) (bool, bool) {
+	if a.kind == foldInt && b.kind == foldInt {
+		return a.i == b.i, true
+	}
+	if !exactFloatComparison(a, b) {
+		return false, false
+	}
 	if a.kind == foldNil || b.kind == foldNil {
 		return a.kind == foldNil && b.kind == foldNil, true
 	}
@@ -712,6 +677,18 @@ func constEqual(a, b foldedValue) (bool, bool) {
 }
 
 func constCompare(a, b foldedValue) (int, bool) {
+	if a.kind == foldInt && b.kind == foldInt {
+		if a.i < b.i {
+			return -1, true
+		}
+		if a.i > b.i {
+			return 1, true
+		}
+		return 0, true
+	}
+	if !exactFloatComparison(a, b) {
+		return 0, false
+	}
 	af, aOk := asFloat(a)
 	bf, bOk := asFloat(b)
 	if aOk && bOk {
@@ -764,39 +741,28 @@ func evalArithOp(op interface{}, left, right foldedValue) (foldedValue, bool) {
 	}
 
 	bothInt := left.kind == foldInt && right.kind == foldInt
+	if bothInt && (name == "OpIDiv" || name == "OpMod") {
+		a, b := left.i, right.i
+		if b == 0 {
+			return foldedValue{}, false
+		}
+		q, r := a/b, a%b
+		if r != 0 && (r < 0) != (b < 0) {
+			q--
+			r += b
+		}
+		if name == "OpMod" {
+			return foldedValue{kind: foldInt, i: r}, true
+		}
+		return foldedValue{kind: foldInt, i: q}, true
+	}
+	// Host libm/rounding and Lua floating modulo are not a portable folding
+	// specification. Keep division/power/float modulo at runtime.
+	if name == "OpPow" || name == "OpDiv" || name == "OpIDiv" || name == "OpMod" {
+		return foldedValue{}, false
+	}
 
 	switch name {
-	case "OpDiv":
-		if rf == 0 {
-			return foldedValue{}, false
-		}
-		return foldedValue{kind: foldFloat, f: lf / rf}, true
-	case "OpPow":
-		res := math.Pow(lf, rf)
-		if math.IsNaN(res) || math.IsInf(res, 0) {
-			return foldedValue{}, false
-		}
-		return foldedValue{kind: foldFloat, f: res}, true
-	case "OpIDiv":
-		if rf == 0 {
-			return foldedValue{}, false
-		}
-		// Lua // is floor division
-		res := math.Floor(lf / rf)
-		if bothInt && res >= math.MinInt64 && res <= math.MaxInt64 {
-			return foldedValue{kind: foldInt, i: int64(res)}, true
-		}
-		return foldedValue{kind: foldFloat, f: res}, true
-	case "OpMod":
-		if rf == 0 {
-			return foldedValue{}, false
-		}
-		// Lua a % b == a - math.floor(a/b)*b
-		res := lf - math.Floor(lf/rf)*rf
-		if bothInt && res >= math.MinInt64 && res <= math.MaxInt64 {
-			return foldedValue{kind: foldInt, i: int64(res)}, true
-		}
-		return foldedValue{kind: foldFloat, f: res}, true
 	case "OpAdd":
 		if bothInt {
 			return foldedValue{kind: foldInt, i: left.i + right.i}, true
@@ -815,4 +781,14 @@ func evalArithOp(op interface{}, left, right foldedValue) (foldedValue, bool) {
 	default:
 		return foldedValue{}, false
 	}
+}
+
+// Mixed integer/float comparison must not round a large int through float64.
+func exactFloatComparison(a, b foldedValue) bool {
+	for _, v := range []foldedValue{a, b} {
+		if v.kind == foldInt && (v.i > 1<<53 || v.i < -(1<<53)) {
+			return false
+		}
+	}
+	return true
 }
